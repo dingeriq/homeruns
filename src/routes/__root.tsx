@@ -77,14 +77,18 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
+      { title: "Daily HR Rankings — Dinger IQ" },
+      { name: "description", content: "Top MLB home run candidates with probability, confidence, and SHAP drivers." },
       { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { property: "og:title", content: "Daily HR Rankings — Dinger IQ" },
+      { property: "og:description", content: "Top MLB home run candidates with probability, confidence, and SHAP drivers." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
       { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:title", content: "Daily HR Rankings — Dinger IQ" },
+      { name: "twitter:description", content: "Top MLB home run candidates with probability, confidence, and SHAP drivers." },
+      { property: "og:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/b46b5d1a-00ee-45c4-a7c3-631186ab7a3a/id-preview-db2a5466--bef1c0a5-7752-4363-9955-f547a83411fe.lovable.app-1784546385980.png" },
+      { name: "twitter:image", content: "https://pub-bb2e103a32db4e198524a2e9ed8f35b4.r2.dev/b46b5d1a-00ee-45c4-a7c3-631186ab7a3a/id-preview-db2a5466--bef1c0a5-7752-4363-9955-f547a83411fe.lovable.app-1784546385980.png" },
     ],
     links: [
       {

@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { DashboardShell } from "@/components/dashboard-shell";
-import { featureImportance } from "@/lib/mock-data";
+import { ErrorPanel, LoadingPanel } from "@/components/query-states";
+import { featureImportanceQuery } from "@/lib/api/queries";
 import { Bar, BarChart, CartesianGrid, Cell, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { cn } from "@/lib/utils";
 
@@ -22,7 +24,10 @@ const groupColors: Record<string, string> = {
 
 function Features() {
   const [metric, setMetric] = useState<"gain" | "permutation" | "shap">("shap");
-  const sorted = [...featureImportance].sort((a, b) => b[metric] - a[metric]);
+  const q = useQuery(featureImportanceQuery());
+
+  const sorted = [...(q.data ?? [])].sort((a, b) => b[metric] - a[metric]);
+
   return (
     <DashboardShell title="Feature Importance" subtitle="XGBoost champion · SHAP mean|φ| across 2025 validation">
       <div className="flex flex-wrap gap-2">
@@ -40,21 +45,26 @@ function Features() {
         ))}
       </div>
 
-      <div className="rounded-lg border border-border bg-card p-4">
-        <ResponsiveContainer width="100%" height={480}>
-          <BarChart data={sorted} layout="vertical" margin={{ left: 140 }}>
-            <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
-            <XAxis type="number" stroke="var(--color-muted-foreground)" fontSize={12} />
-            <YAxis type="category" dataKey="feature" stroke="var(--color-muted-foreground)" fontSize={11} width={130} />
-            <Tooltip contentStyle={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: 6 }} />
-            <Bar dataKey={metric} radius={[0, 4, 4, 0]}>
-              {sorted.map((f, i) => (
-                <Cell key={i} fill={groupColors[f.group] ?? "oklch(0.6 0.1 260)"} />
-              ))}
-            </Bar>
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+      {q.isLoading && <LoadingPanel />}
+      {q.isError && <ErrorPanel error={q.error} onRetry={() => q.refetch()} />}
+
+      {!q.isLoading && !q.isError && (
+        <div className="rounded-lg border border-border bg-card p-4">
+          <ResponsiveContainer width="100%" height={480}>
+            <BarChart data={sorted} layout="vertical" margin={{ left: 140 }}>
+              <CartesianGrid stroke="var(--color-border)" strokeDasharray="3 3" />
+              <XAxis type="number" stroke="var(--color-muted-foreground)" fontSize={12} />
+              <YAxis type="category" dataKey="feature" stroke="var(--color-muted-foreground)" fontSize={11} width={130} />
+              <Tooltip contentStyle={{ background: "var(--color-card)", border: "1px solid var(--color-border)", borderRadius: 6 }} />
+              <Bar dataKey={metric} radius={[0, 4, 4, 0]}>
+                {sorted.map((f, i) => (
+                  <Cell key={i} fill={groupColors[f.group] ?? "oklch(0.6 0.1 260)"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
 
       <div className="rounded-lg border border-border bg-card p-4">
         <h2 className="text-sm font-semibold mb-3">Group legend</h2>

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useQuery } from "@tanstack/react-query";
 import { DashboardShell, StatCard } from "@/components/dashboard-shell";
-import { modelPerformance } from "@/lib/mock-data";
+import { ErrorPanel, LoadingPanel } from "@/components/query-states";
+import { modelPerformanceQuery } from "@/lib/api/queries";
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Scatter, ScatterChart, Tooltip, XAxis, YAxis, Legend } from "recharts";
 
 export const Route = createFileRoute("/performance")({
@@ -9,15 +11,33 @@ export const Route = createFileRoute("/performance")({
 });
 
 function Performance() {
-  const { models, calibration, rollingAuc } = modelPerformance;
+  const q = useQuery(modelPerformanceQuery());
+
+  if (q.isLoading) {
+    return (
+      <DashboardShell title="Model Performance" subtitle="Walk-forward validation">
+        <LoadingPanel />
+      </DashboardShell>
+    );
+  }
+  if (q.isError || !q.data) {
+    return (
+      <DashboardShell title="Model Performance" subtitle="—">
+        <ErrorPanel error={q.error ?? new Error("No data")} onRetry={() => q.refetch()} />
+      </DashboardShell>
+    );
+  }
+
+  const { models, calibration, rolling_auc: rollingAuc, headline } = q.data;
+
   return (
     <DashboardShell title="Model Performance" subtitle="Walk-forward validation · 2025 season">
       <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <StatCard label="ROC-AUC" value="0.742" delta="XGBoost champion" tone="positive" />
-        <StatCard label="PR-AUC" value="0.187" />
-        <StatCard label="Log Loss" value="0.284" />
-        <StatCard label="Brier" value="0.081" />
-        <StatCard label="ECE" value="0.014" tone="positive" />
+        <StatCard label="ROC-AUC" value={headline.roc_auc.toFixed(3)} delta={`${headline.champion} champion`} tone="positive" />
+        <StatCard label="PR-AUC" value={headline.pr_auc.toFixed(3)} />
+        <StatCard label="Log Loss" value={headline.log_loss.toFixed(3)} />
+        <StatCard label="Brier" value={headline.brier.toFixed(3)} />
+        <StatCard label="ECE" value={headline.ece.toFixed(3)} tone="positive" />
       </div>
 
       <div className="rounded-lg border border-border bg-card overflow-hidden">
@@ -37,12 +57,12 @@ function Performance() {
           </thead>
           <tbody>
             {models.map((m, i) => (
-              <tr key={m.name} className={`border-t border-border ${i === 0 ? "bg-emerald-500/5" : ""}`}>
-                <td className="px-4 py-2 font-medium">{m.name}{i === 0 && <span className="ml-2 text-xs text-emerald-500">★ champion</span>}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{m.logLoss.toFixed(3)}</td>
+              <tr key={m.name} className={`border-t border-border ${m.name === headline.champion ? "bg-emerald-500/5" : ""}`}>
+                <td className="px-4 py-2 font-medium">{m.name}{m.name === headline.champion && <span className="ml-2 text-xs text-emerald-500">★ champion</span>}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.log_loss.toFixed(3)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{m.brier.toFixed(3)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{m.rocAuc.toFixed(3)}</td>
-                <td className="px-4 py-2 text-right tabular-nums">{m.prAuc.toFixed(3)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.roc_auc.toFixed(3)}</td>
+                <td className="px-4 py-2 text-right tabular-nums">{m.pr_auc.toFixed(3)}</td>
                 <td className="px-4 py-2 text-right tabular-nums">{m.ece.toFixed(3)}</td>
               </tr>
             ))}

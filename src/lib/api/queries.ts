@@ -1,5 +1,14 @@
 import { queryOptions } from "@tanstack/react-query";
 import { apiFetch } from "./client";
+import {
+  mockBacktest,
+  mockFeaturedMatchup,
+  mockFeatureImportance,
+  mockModelPerformance,
+  mockPlayer,
+  mockSlateSummary,
+  mockTopCandidates,
+} from "./mock-data";
 
 // Response types mirror the Phase 10 FastAPI service.
 export type RankingDto = {
@@ -74,53 +83,93 @@ export type SlateSummaryDto = {
   avg_confidence: number;
 };
 
+// Every queryFn transparently falls back to mock data when the API is down.
+// `apiFetch` calls `enableDemoMode(...)` on failure, so the banner/badge react
+// automatically. The UI stays fully functional in Demo Mode.
+async function withFallback<T>(fn: () => Promise<T>, fallback: () => T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn("[api] falling back to mock data:", err);
+    return fallback();
+  }
+}
+
 // ---- Query option factories ----
 
 export const topCandidatesQuery = (limit = 25) =>
   queryOptions({
     queryKey: ["predictions", "today", { limit }],
-    queryFn: () => apiFetch<RankingDto[]>(`/top-home-run-candidates?limit=${limit}`),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<RankingDto[]>(`/top-home-run-candidates?limit=${limit}`),
+        () => mockTopCandidates(limit),
+      ),
     staleTime: 60_000,
   });
 
 export const slateSummaryQuery = () =>
   queryOptions({
     queryKey: ["predictions", "slate-summary"],
-    queryFn: () => apiFetch<SlateSummaryDto>("/predictions/today/summary"),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<SlateSummaryDto>("/predictions/today/summary"),
+        () => mockSlateSummary(),
+      ),
     staleTime: 60_000,
   });
 
 export const playerQuery = (playerId: string) =>
   queryOptions({
     queryKey: ["player", playerId],
-    queryFn: () => apiFetch<PlayerDto>(`/player/${encodeURIComponent(playerId)}`),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<PlayerDto>(`/player/${encodeURIComponent(playerId)}`),
+        () => mockPlayer(playerId),
+      ),
     staleTime: 60_000,
   });
 
 export const featuredMatchupQuery = () =>
   queryOptions({
     queryKey: ["predictions", "featured-matchup"],
-    queryFn: () => apiFetch<GameDto>("/predictions/game/featured"),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<GameDto>("/predictions/game/featured"),
+        () => mockFeaturedMatchup(),
+      ),
     staleTime: 60_000,
   });
 
 export const modelPerformanceQuery = () =>
   queryOptions({
     queryKey: ["model", "performance"],
-    queryFn: () => apiFetch<ModelPerformanceDto>("/model/performance"),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<ModelPerformanceDto>("/model/performance"),
+        () => mockModelPerformance(),
+      ),
     staleTime: 5 * 60_000,
   });
 
 export const featureImportanceQuery = () =>
   queryOptions({
     queryKey: ["model", "feature-importance"],
-    queryFn: () => apiFetch<FeatureImportanceDto>("/model/feature-importance"),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<FeatureImportanceDto>("/model/feature-importance"),
+        () => mockFeatureImportance(),
+      ),
     staleTime: 10 * 60_000,
   });
 
 export const backtestQuery = () =>
   queryOptions({
     queryKey: ["model", "backtest"],
-    queryFn: () => apiFetch<BacktestDto>("/model/backtest"),
+    queryFn: () =>
+      withFallback(
+        () => apiFetch<BacktestDto>("/model/backtest"),
+        () => mockBacktest(),
+      ),
     staleTime: 10 * 60_000,
   });

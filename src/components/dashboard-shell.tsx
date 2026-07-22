@@ -2,6 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, LineChart, Search, TrendingUp, Trophy, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { DemoBanner } from "@/components/demo-banner";
+import { EnvBadge } from "@/components/env-badge";
+import { ClientOnly } from "@/components/client-only";
 
 const nav = [
   { to: "/", label: "Daily Rankings", icon: Trophy },

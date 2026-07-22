@@ -12,9 +12,9 @@ export const API_KEY: string | undefined = import.meta.env.VITE_API_KEY as
 export type EnvLabel = "Local" | "Development" | "Production";
 
 /**
- * Derive a human-readable environment label from the current hostname and
- * configured API base URL. SSR returns a stable "Local" default to keep
- * hydration deterministic — the real label is resolved on the client.
+ * Human-readable environment label derived from hostname.
+ * SSR returns a stable "Local" default so hydration stays deterministic;
+ * the real label is resolved on the client after mount.
  */
 export function getEnvLabel(): EnvLabel {
   if (typeof window === "undefined") return "Local";
@@ -24,18 +24,10 @@ export function getEnvLabel(): EnvLabel {
   }
   if (
     host.includes("lovableproject.com") ||
-    host.includes("lovable.app") && host.includes("-dev") ||
     host.includes("preview") ||
-    /API_BASE_URL/i.test("") // placeholder — see below
+    host.includes("-dev")
   ) {
-    // Preview / dev hosts
-    if (
-      host.includes("lovableproject.com") ||
-      host.includes("preview") ||
-      host.includes("-dev")
-    ) {
-      return "Development";
-    }
+    return "Development";
   }
   return "Production";
 }

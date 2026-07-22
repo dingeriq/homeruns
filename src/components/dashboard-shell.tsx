@@ -2,6 +2,9 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { BarChart3, Home, LineChart, Search, TrendingUp, Trophy, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
+import { DemoBanner } from "@/components/demo-banner";
+import { EnvBadge } from "@/components/env-badge";
+import { ClientOnly } from "@/components/client-only";
 
 const nav = [
   { to: "/", label: "Daily Rankings", icon: Trophy },
@@ -55,11 +58,19 @@ export function DashboardShell({ children, title, subtitle }: { children: ReactN
             <h1 className="text-lg font-semibold">{title}</h1>
             {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
-          <div className="text-xs text-muted-foreground">
-            {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+          <div className="flex items-center gap-3">
+            <ClientOnly><EnvBadge /></ClientOnly>
+            <ClientOnly>
+              <span className="text-xs text-muted-foreground">
+                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+              </span>
+            </ClientOnly>
           </div>
         </header>
-        <main className="flex-1 p-6 space-y-6">{children}</main>
+        <main className="flex-1 p-6 space-y-6">
+          <ClientOnly><DemoBanner /></ClientOnly>
+          {children}
+        </main>
       </div>
     </div>
   );

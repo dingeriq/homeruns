@@ -1,9 +1,9 @@
-// Client for the Phase 10 FastAPI service.
-// Configure via Vite env:
-//   VITE_API_BASE_URL   e.g. https://api.dingeriq.app
-//   VITE_API_KEY        optional X-API-Key
-const BASE = (import.meta.env.VITE_API_BASE_URL ?? "").replace(/\/$/, "");
-const KEY = import.meta.env.VITE_API_KEY as string | undefined;
+// Thin fetch wrapper over the FastAPI service. Reads config from ./config.ts.
+// On any failure, flips the app into demo mode and rethrows so callers
+// (React Query queryFns) can decide whether to substitute mock data.
+
+import { API_BASE_URL, API_KEY } from "./config";
+import { enableDemoMode } from "./demo-mode";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -12,14 +12,18 @@ export class ApiError extends Error {
 }
 
 export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
-  if (!BASE) {
-    throw new ApiError(0, "VITE_API_BASE_URL is not configured");
-  }
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
-  if (KEY) headers.set("X-API-Key", KEY);
+  if (API_KEY) headers.set("X-API-Key", API_KEY);
 
-  const res = await fetch(`${BASE}${path}`, { ...init, headers });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+  } catch (err) {
+    enableDemoMode(`network error on ${path}`);
+    throw new ApiError(0, err instanceof Error ? err.message : "Network error");
+  }
+
   if (!res.ok) {
     let msg = `${res.status} ${res.statusText}`;
     try {
@@ -28,6 +32,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
     } catch {
       // ignore
     }
+    enableDemoMode(`HTTP ${res.status} on ${path}`);
     throw new ApiError(res.status, msg);
   }
   return (await res.json()) as T;

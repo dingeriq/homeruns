@@ -203,3 +203,53 @@ export function mockBacktest(): BacktestDto {
     },
   };
 }
+
+// ---- Mocks for services.ts endpoints (/games/today, /players, /teams) ----
+
+import type { GameSummary, PlayerSummary, Team } from "./services";
+
+export function mockGamesToday(): GameSummary[] {
+  const today = new Date().toISOString().slice(0, 10);
+  return Array.from({ length: 8 }, (_, i) => ({
+    game_id: `g-demo-${i + 1}`,
+    date: today,
+    first_pitch: `${today}T${String(19 + (i % 3)).padStart(2, "0")}:05:00Z`,
+    home_team: teams[i % teams.length],
+    away_team: teams[(i + 4) % teams.length],
+    park: parks[i % parks.length],
+    status: "scheduled",
+  }));
+}
+
+export function mockPlayers(): PlayerSummary[] {
+  return names.map((name, i) => ({
+    player_id: `p${1000 + i}`,
+    name,
+    team: teams[i % teams.length],
+    position: ["OF", "IF", "DH", "C"][i % 4],
+    bats: (["L", "R", "S"] as const)[i % 3],
+    throws: (["L", "R"] as const)[i % 2],
+  }));
+}
+
+export function mockTeams(): Team[] {
+  const meta: Array<{ id: string; name: string; league: "AL" | "NL"; division: "E" | "C" | "W"; park: string }> = [
+    { id: "NYY", name: "New York Yankees", league: "AL", division: "E", park: "Yankee Stadium" },
+    { id: "LAD", name: "Los Angeles Dodgers", league: "NL", division: "W", park: "Dodger Stadium" },
+    { id: "HOU", name: "Houston Astros", league: "AL", division: "W", park: "Minute Maid Park" },
+    { id: "ATL", name: "Atlanta Braves", league: "NL", division: "E", park: "Truist Park" },
+    { id: "TOR", name: "Toronto Blue Jays", league: "AL", division: "E", park: "Rogers Centre" },
+    { id: "BAL", name: "Baltimore Orioles", league: "AL", division: "E", park: "Camden Yards" },
+    { id: "TEX", name: "Texas Rangers", league: "AL", division: "W", park: "Globe Life Field" },
+    { id: "PHI", name: "Philadelphia Phillies", league: "NL", division: "E", park: "Citizens Bank Park" },
+    { id: "SD",  name: "San Diego Padres", league: "NL", division: "W", park: "Petco Park" },
+    { id: "SEA", name: "Seattle Mariners", league: "AL", division: "W", park: "T-Mobile Park" },
+  ];
+  return meta.map((m) => ({
+    team_id: m.id,
+    name: m.name,
+    league: m.league,
+    division: m.division,
+    park: m.park,
+  }));
+}

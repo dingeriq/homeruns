@@ -48,9 +48,48 @@ export type Team = {
 
 // ---- Endpoint functions ----
 
+async function withFallback<T>(fn: () => Promise<T>, fallback: () => T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn("[api] falling back to mock data:", err);
+    return fallback();
+  }
+}
+
 export const getHealth = () => apiFetch<HealthDto>("/health");
 export const getGamesToday = () => apiFetch<GameSummary[]>("/games/today");
 export const getPlayers = () => apiFetch<PlayerSummary[]>("/players");
 export const getTeams = () => apiFetch<Team[]>("/teams");
 export const getPredictionsToday = () =>
   apiFetch<RankingDto[]>("/predictions/today");
+
+// ---- React Query option factories (with mock fallback) ----
+
+export const gamesTodayQuery = () =>
+  queryOptions({
+    queryKey: ["games", "today"],
+    queryFn: () => withFallback(getGamesToday, mockGamesToday),
+    staleTime: 60_000,
+  });
+
+export const playersQuery = () =>
+  queryOptions({
+    queryKey: ["players"],
+    queryFn: () => withFallback(getPlayers, mockPlayers),
+    staleTime: 5 * 60_000,
+  });
+
+export const teamsQuery = () =>
+  queryOptions({
+    queryKey: ["teams"],
+    queryFn: () => withFallback(getTeams, mockTeams),
+    staleTime: 60 * 60_000,
+  });
+
+export const predictionsTodayQuery = () =>
+  queryOptions({
+    queryKey: ["predictions", "today", "all"],
+    queryFn: () => withFallback(getPredictionsToday, () => mockTopCandidates(25)),
+    staleTime: 60_000,
+  });

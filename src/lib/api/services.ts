@@ -10,7 +10,9 @@
 //   GET /teams               -> Team[]
 //   GET /predictions/today   -> RankingDto[]  (see ./queries)
 
+import { queryOptions } from "@tanstack/react-query";
 import { apiFetch } from "./client";
+import { mockGamesToday, mockPlayers, mockTeams, mockTopCandidates } from "./mock-data";
 import type { RankingDto } from "./queries";
 
 // ---- Response DTOs ----

@@ -200,6 +200,7 @@ export function mockBacktest(): BacktestDto {
       roi: totalRoi,
       sharpe: 1.32,
       max_drawdown: -8.4,
+    },
   };
 }
 

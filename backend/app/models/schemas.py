@@ -37,6 +37,9 @@ class Game(BaseModel):
     away_team: str
     venue: str
     status: str
+    home_probable_pitcher: Optional[str] = None
+    away_probable_pitcher: Optional[str] = None
+
 
 
 class Prediction(BaseModel):

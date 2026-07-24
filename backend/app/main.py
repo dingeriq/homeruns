@@ -9,10 +9,16 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import games, health, players, predictions, teams
+from app.api import admin, games, health, players, predictions, teams
 from app.config import settings
+from app.database.session import init_db
 from app.logging_config import configure_logging
 from app.models.schemas import ErrorResponse
+from app.services.scheduler import (
+    initial_sync_in_background,
+    shutdown_scheduler,
+    start_scheduler,
+)
 
 configure_logging()
 logger = logging.getLogger("dingeriq.api")
@@ -35,12 +41,7 @@ app.add_middleware(
 @app.middleware("http")
 async def access_log(request: Request, call_next):
     response = await call_next(request)
-    logger.info(
-        "%s %s -> %s",
-        request.method,
-        request.url.path,
-        response.status_code,
-    )
+    logger.info("%s %s -> %s", request.method, request.url.path, response.status_code)
     return response
 
 
@@ -74,8 +75,21 @@ app.include_router(games.router)
 app.include_router(players.router)
 app.include_router(teams.router)
 app.include_router(predictions.router)
+app.include_router(admin.router)
 
 
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
+    try:
+        init_db()
+        logger.info("Database schema ready")
+    except Exception as exc:
+        logger.exception("init_db failed: %s", exc)
+    start_scheduler()
+    await initial_sync_in_background()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    shutdown_scheduler()

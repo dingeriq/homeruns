@@ -1,14 +1,17 @@
 import { queryOptions } from "@tanstack/react-query";
-import { apiFetch } from "./client";
 import {
   mockBacktest,
-  mockFeaturedMatchup,
   mockFeatureImportance,
   mockModelPerformance,
-  mockPlayer,
-  mockSlateSummary,
-  mockTopCandidates,
 } from "./mock-data";
+import { withFallback } from "./fallback";
+import { logApi } from "./log";
+import {
+  adaptPredictions,
+  getGamesToday,
+  getPlayers,
+  getPredictionsToday,
+} from "./services";
 
 // Response types mirror the Phase 10 FastAPI service.
 export type RankingDto = {
@@ -83,27 +86,32 @@ export type SlateSummaryDto = {
   avg_confidence: number;
 };
 
-// Every queryFn transparently falls back to mock data when the API is down.
-// `apiFetch` calls `enableDemoMode(...)` on failure, so the banner/badge react
-// automatically. The UI stays fully functional in Demo Mode.
-async function withFallback<T>(fn: () => Promise<T>, fallback: () => T): Promise<T> {
-  try {
-    return await fn();
-  } catch (err) {
-    console.warn("[api] falling back to mock data:", err);
-    return fallback();
-  }
-}
+const emptyStats = {
+  barrel_14: 0,
+  barrel_30: 0,
+  hard_hit: 0,
+  exit_velo: 0,
+  fly_ball: 0,
+  pull: 0,
+  iso: 0,
+  hr_per_pa: 0,
+  x_slg: 0,
+  x_woba: 0,
+};
 
-// ---- Query option factories ----
+// ---- Query option factories (live PostgreSQL-backed endpoints) ----
 
 export const topCandidatesQuery = (limit = 25) =>
   queryOptions({
     queryKey: ["predictions", "today", { limit }],
     queryFn: () =>
-      withFallback(
-        () => apiFetch<RankingDto[]>(`/top-home-run-candidates?limit=${limit}`),
-        () => mockTopCandidates(limit),
+      withFallback<RankingDto[]>(
+        "GET /predictions/today",
+        async () => {
+          const [preds, games] = await Promise.all([getPredictionsToday(), getGamesToday()]);
+          return adaptPredictions(preds, games).slice(0, limit);
+        },
+        () => [],
       ),
     staleTime: 60_000,
   });
@@ -112,9 +120,22 @@ export const slateSummaryQuery = () =>
   queryOptions({
     queryKey: ["predictions", "slate-summary"],
     queryFn: () =>
-      withFallback(
-        () => apiFetch<SlateSummaryDto>("/predictions/today/summary"),
-        () => mockSlateSummary(),
+      withFallback<SlateSummaryDto>(
+        "derived: slate summary (/games/today + /predictions/today)",
+        async () => {
+          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
+          const rows = adaptPredictions(preds, games);
+          const top = rows[0];
+          const avg = rows.length ? rows.reduce((a, r) => a + r.confidence, 0) / rows.length : 0;
+          return {
+            games: games.length,
+            hitters_scored: rows.length,
+            top_prob: top?.p_hr ?? 0,
+            top_prob_player: top?.player ?? "—",
+            avg_confidence: avg,
+          };
+        },
+        () => ({ games: 0, hitters_scored: 0, top_prob: 0, top_prob_player: "—", avg_confidence: 0 }),
       ),
     staleTime: 60_000,
   });
@@ -123,9 +144,47 @@ export const playerQuery = (playerId: string) =>
   queryOptions({
     queryKey: ["player", playerId],
     queryFn: () =>
-      withFallback(
-        () => apiFetch<PlayerDto>(`/player/${encodeURIComponent(playerId)}`),
-        () => mockPlayer(playerId),
+      withFallback<PlayerDto>(
+        `GET /players (lookup ${playerId})`,
+        async () => {
+          const [players, preds, games] = await Promise.all([
+            getPlayers(1000),
+            getPredictionsToday(),
+            getGamesToday(),
+          ]);
+          const p = players.find((x) => x.player_id === String(playerId));
+          const ranked = adaptPredictions(preds, games).find((r) => r.player_id === String(playerId));
+          if (!p && !ranked) throw new Error(`Player ${playerId} not found in database`);
+          const base: RankingDto = ranked ?? {
+            rank: 0,
+            player_id: String(playerId),
+            player: p?.name ?? String(playerId),
+            team: p?.team ?? "",
+            opp: "",
+            pitcher: "",
+            park: "",
+            p_hr: 0,
+            confidence: 0,
+            drivers: [],
+            negatives: [],
+          };
+          return { ...base, player: p?.name ?? base.player, team: p?.team ?? base.team, stats: emptyStats, last_30: [] };
+        },
+        () => ({
+          rank: 0,
+          player_id: String(playerId),
+          player: String(playerId),
+          team: "",
+          opp: "",
+          pitcher: "",
+          park: "",
+          p_hr: 0,
+          confidence: 0,
+          drivers: [],
+          negatives: [],
+          stats: emptyStats,
+          last_30: [],
+        }),
       ),
     staleTime: 60_000,
   });
@@ -134,42 +193,90 @@ export const featuredMatchupQuery = () =>
   queryOptions({
     queryKey: ["predictions", "featured-matchup"],
     queryFn: () =>
-      withFallback(
-        () => apiFetch<GameDto>("/predictions/game/featured"),
-        () => mockFeaturedMatchup(),
+      withFallback<GameDto | null>(
+        "derived: featured matchup (/games/today)",
+        async () => {
+          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
+          const g = games[0];
+          if (!g) return null;
+          const ranked = adaptPredictions(preds, games).find((r) => r.player_id) ?? null;
+          const batter: GameDto["batter"] = {
+            ...(ranked ?? {
+              rank: 0,
+              player_id: "",
+              player: "—",
+              team: g.home_team,
+              opp: g.away_team,
+              pitcher: g.away_probable_pitcher ?? "TBD",
+              park: g.park,
+              p_hr: 0,
+              confidence: 0,
+              drivers: [],
+              negatives: [],
+            }),
+            hand: "R",
+            order: 0,
+            vs_hand_woba: 0,
+            vs_hand_iso: 0,
+          };
+          return {
+            game_id: g.game_id,
+            home: g.home_team,
+            away: g.away_team,
+            park: g.park,
+            first_pitch: g.first_pitch,
+            weather: { temp_f: 0, humidity: 0, wind_mph: 0, wind_dir: "—", conditions: "—" },
+            vegas: { total: 0, home_total: 0, away_total: 0 },
+            batter,
+            pitcher: {
+              name: g.home_probable_pitcher ?? g.away_probable_pitcher ?? "TBD",
+              hand: "R",
+              hr_per_9: 0,
+              barrel_pct_allowed: 0,
+              fb_pct_allowed: 0,
+              season_x_era: 0,
+            },
+            park_factors: { hr_factor_r: 0, hr_factor_l: 0 },
+            pitch_types: [],
+          };
+        },
+        () => null,
       ),
     staleTime: 60_000,
   });
 
+// ---- Model analytics: no backend endpoint exists yet (ML phase pending). ----
+// These intentionally serve static reference data and are logged as such.
+
 export const modelPerformanceQuery = () =>
   queryOptions({
     queryKey: ["model", "performance"],
-    queryFn: () =>
-      withFallback(
-        () => apiFetch<ModelPerformanceDto>("/model/performance"),
-        () => mockModelPerformance(),
-      ),
+    queryFn: async () => {
+      const data = mockModelPerformance();
+      logApi("model performance", data.models.length, "mock", "no backend endpoint yet");
+      return data;
+    },
     staleTime: 5 * 60_000,
   });
 
 export const featureImportanceQuery = () =>
   queryOptions({
     queryKey: ["model", "feature-importance"],
-    queryFn: () =>
-      withFallback(
-        () => apiFetch<FeatureImportanceDto>("/model/feature-importance"),
-        () => mockFeatureImportance(),
-      ),
+    queryFn: async () => {
+      const data = mockFeatureImportance();
+      logApi("model feature-importance", data.length, "mock", "no backend endpoint yet");
+      return data;
+    },
     staleTime: 10 * 60_000,
   });
 
 export const backtestQuery = () =>
   queryOptions({
     queryKey: ["model", "backtest"],
-    queryFn: () =>
-      withFallback(
-        () => apiFetch<BacktestDto>("/model/backtest"),
-        () => mockBacktest(),
-      ),
+    queryFn: async () => {
+      const data = mockBacktest();
+      logApi("model backtest", data.months.length, "mock", "no backend endpoint yet");
+      return data;
+    },
     staleTime: 10 * 60_000,
   });

@@ -23,6 +23,10 @@ class Settings:
     )
     mlb_api_base: str = os.getenv("MLB_API_BASE", "https://statsapi.mlb.com/api/v1")
     mlb_season: int = int(os.getenv("MLB_SEASON", "2026"))
+    savant_api_base: str = os.getenv("SAVANT_API_BASE", "https://baseballsavant.mlb.com")
+    statcast_lookback_days: int = int(os.getenv("STATCAST_LOOKBACK_DAYS", "2"))
+    statcast_refresh_hour: int = int(os.getenv("STATCAST_REFRESH_HOUR", "9"))
+    statcast_refresh_minute: int = int(os.getenv("STATCAST_REFRESH_MINUTE", "30"))
     daily_refresh_hour: int = int(os.getenv("DAILY_REFRESH_HOUR", "8"))
     daily_refresh_minute: int = int(os.getenv("DAILY_REFRESH_MINUTE", "0"))
     cors_origins: List[str] = field(

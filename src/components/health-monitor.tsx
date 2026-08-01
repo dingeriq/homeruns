@@ -1,50 +1,41 @@
 import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { checkHealth } from "@/lib/api/health";
-import { disableDemoMode, enableDemoMode, useDemoMode } from "@/lib/api/demo-mode";
+import { disableDemoMode, enableDemoMode, isDemoMode } from "@/lib/api/demo-mode";
 
 /**
- * Client-only mount:
- *  - Runs one `/health` check on mount. If it fails, enables demo mode.
- *  - While demo mode is active, polls `/health` every 30s. On first success:
- *    disables demo mode, invalidates all React Query caches so active queries
- *    refetch from the live backend.
+ * Single source of truth for demo mode:
+ *  - GET /health succeeds  -> live mode (backend/PostgreSQL data only)
+ *  - GET /health fails     -> demo mode (mock fixtures)
+ * Polls every 30s in both directions and refetches queries on recovery.
  */
 export function HealthMonitor() {
   const queryClient = useQueryClient();
-  const { isDemoMode } = useDemoMode();
 
-  // Startup probe (runs once).
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
+
+    const probe = async () => {
       const ok = await checkHealth();
       if (cancelled) return;
+      console.info(`[api] GET /health → ${ok ? "healthy (PostgreSQL live)" : "unreachable"}`);
       if (!ok) {
-        enableDemoMode("startup /health failed");
+        enableDemoMode("GET /health failed");
+        return;
       }
-    })();
-    return () => {
-      cancelled = true;
+      if (isDemoMode()) {
+        disableDemoMode();
+        void queryClient.invalidateQueries();
+      }
     };
-  }, []);
 
-  // Recovery poll while in demo mode.
-  useEffect(() => {
-    if (!isDemoMode) return;
-    let cancelled = false;
-    const id = window.setInterval(async () => {
-      const ok = await checkHealth();
-      if (cancelled || !ok) return;
-      disableDemoMode();
-      // Invalidate everything so active queries refetch from the live API.
-      void queryClient.invalidateQueries();
-    }, 30_000);
+    void probe();
+    const id = window.setInterval(() => void probe(), 30_000);
     return () => {
       cancelled = true;
       window.clearInterval(id);
     };
-  }, [isDemoMode, queryClient]);
+  }, [queryClient]);
 
   return null;
 }

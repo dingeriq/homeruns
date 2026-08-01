@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 
 logger = logging.getLogger("dingeriq.scheduler")
@@ -24,6 +25,15 @@ async def _job() -> None:
         logger.exception("Daily refresh failed: %s", exc)
 
 
+async def _statcast_job() -> None:
+    logger.info("Daily Statcast ingest starting")
+    try:
+        result = await sync_statcast()
+        logger.info("Statcast ingest complete: %s", result)
+    except Exception as exc:
+        logger.exception("Statcast ingest failed: %s", exc)
+
+
 def start_scheduler() -> None:
     global _scheduler
     if _scheduler:
@@ -36,12 +46,24 @@ def start_scheduler() -> None:
         max_instances=1,
         coalesce=True,
     )
+    sched.add_job(
+        _statcast_job,
+        CronTrigger(
+            hour=settings.statcast_refresh_hour,
+            minute=settings.statcast_refresh_minute,
+        ),
+        id="daily-statcast-ingest",
+        max_instances=1,
+        coalesce=True,
+    )
     sched.start()
     _scheduler = sched
     logger.info(
-        "Scheduler started (daily at %02d:%02d UTC)",
+        "Scheduler started (MLB %02d:%02d UTC, Statcast %02d:%02d UTC)",
         settings.daily_refresh_hour,
         settings.daily_refresh_minute,
+        settings.statcast_refresh_hour,
+        settings.statcast_refresh_minute,
     )
 
 

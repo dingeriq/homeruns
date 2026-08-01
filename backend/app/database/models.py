@@ -49,3 +49,60 @@ class Game(Base):
     status: Mapped[str] = mapped_column(String(32))
     home_probable_pitcher: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     away_probable_pitcher: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+
+class StatcastPitch(Base):
+    """Raw pitch-level Statcast data from Baseball Savant (no derived features)."""
+
+    __tablename__ = "statcast_pitches"
+
+    pitch_uid: Mapped[str] = mapped_column(String(48), primary_key=True)
+    game_id: Mapped[int] = mapped_column(Integer, index=True)
+    game_date: Mapped[date] = mapped_column(Date, index=True)
+    at_bat_number: Mapped[int] = mapped_column(Integer)
+    pitch_number: Mapped[int] = mapped_column(Integer)
+
+    pitcher_id: Mapped[int] = mapped_column(Integer, index=True)
+    batter_id: Mapped[int] = mapped_column(Integer, index=True)
+
+    # Pitcher characteristics
+    pitch_type: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    pitch_name: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    velocity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spin_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    horizontal_break: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    vertical_break: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    release_pos_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    release_pos_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    release_pos_z: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    extension: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    plate_x: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    plate_z: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Batted-ball / contact
+    exit_velocity: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    launch_angle: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    hit_distance: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spray_angle: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    spray_angle_y: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    barrel_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+    hard_hit_flag: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    # Expected metrics
+    estimated_ba: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    estimated_woba: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    woba_value: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Context
+    bb_type: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    events: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    stand: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    p_throws: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    home_team: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    away_team: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+
+    __table_args__ = (
+        Index("ix_statcast_batter_date", "batter_id", "game_date"),
+        Index("ix_statcast_pitcher_date", "pitcher_id", "game_date"),
+    )

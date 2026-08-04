@@ -12,8 +12,17 @@ from app.config import settings
 
 logger = logging.getLogger("dingeriq.db")
 
+def _normalize_url(url: str) -> str:
+    """Railway/Heroku hand out postgres:// or postgresql:// URLs; force psycopg3."""
+    if url.startswith("postgres://"):
+        url = "postgresql://" + url[len("postgres://") :]
+    if url.startswith("postgresql://"):
+        url = "postgresql+psycopg://" + url[len("postgresql://") :]
+    return url
+
+
 engine = create_engine(
-    settings.database_url,
+    _normalize_url(settings.database_url),
     pool_pre_ping=True,
     pool_size=5,
     max_overflow=10,

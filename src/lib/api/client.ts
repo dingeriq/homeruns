@@ -2,7 +2,7 @@
 // It never toggles demo mode: only a failing GET /health does that
 // (see ./health.ts, ./fallback.ts and components/health-monitor.tsx).
 
-import { API_BASE_URL, API_KEY } from "./config";
+import { getApiBaseUrl, API_KEY } from "./config";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -17,7 +17,7 @@ export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   let res: Response;
   try {
-    res = await fetch(`${API_BASE_URL}${path}`, { ...init, headers });
+    res = await fetch(`${getApiBaseUrl()}${path}`, { ...init, headers });
   } catch (err) {
     throw new ApiError(0, err instanceof Error ? err.message : "Network error");
   }

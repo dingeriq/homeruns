@@ -32,6 +32,8 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origins or ["*"],
+    # Lovable preview + published domains (e.g. https://homeruns.lovable.app)
+    allow_origin_regex=r"https://.*\.(lovable\.app|lovableproject\.com)",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

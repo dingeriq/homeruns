@@ -1,11 +1,11 @@
-import { API_BASE_URL } from "./config";
+import { getApiBaseUrl } from "./config";
 
 /** Ping the backend `/health` endpoint with a 3s timeout. */
 export async function checkHealth(): Promise<boolean> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), 3000);
   try {
-    const res = await fetch(`${API_BASE_URL}/health`, {
+    const res = await fetch(`${getApiBaseUrl()}/health`, {
       method: "GET",
       signal: ctrl.signal,
       headers: { Accept: "application/json" },

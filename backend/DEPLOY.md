@@ -1,61 +1,99 @@
-# Deploying the DingerIQ backend
+# Deploying the DingerIQ backend to Railway
 
-The hosted dashboard (`https://homeruns.lovable.app`) runs in the visitor's
-browser. `http://localhost:8000` therefore resolves to **their** machine, not
-your laptop — and an HTTPS page is not allowed to call a plain HTTP address
-(mixed content). The backend must be reachable at a public **HTTPS** URL.
+Everything in this folder is Railway-ready. You run these commands (Railway
+requires your own account/credentials, so this step can't be automated from
+Lovable).
 
-## Option A — Fly.io (recommended)
+## 1. Install + login
+
+```bash
+npm i -g @railway/cli
+railway login
+```
+
+## 2. Create the project and Postgres
 
 ```bash
 cd backend
-fly launch --no-deploy --copy-config --name dingeriq-api
-fly postgres create --name dingeriq-db
-fly postgres attach dingeriq-db          # sets DATABASE_URL
-fly secrets set CORS_ORIGINS=https://homeruns.lovable.app
-fly deploy
-curl https://dingeriq-api.fly.dev/health
+railway init                 # name it "dingeriq-api"
+railway add --database postgres
 ```
 
-Note: `DATABASE_URL` from Fly starts with `postgres://`; the app expects
-`postgresql+psycopg://`. Set it explicitly if needed:
+Railway automatically exposes `DATABASE_URL` to the service. The app
+normalizes `postgres://` / `postgresql://` to the psycopg3 driver, so no
+editing is needed.
+
+## 3. Set environment variables
 
 ```bash
-fly secrets set DATABASE_URL='postgresql+psycopg://USER:PASS@dingeriq-db.flycast:5432/dingeriq'
+railway variables \
+  --set "ENVIRONMENT=production" \
+  --set "MLB_SEASON=2026" \
+  --set "STATCAST_LOOKBACK_DAYS=2" \
+  --set "STATCAST_REFRESH_HOUR=9" \
+  --set "STATCAST_REFRESH_MINUTE=30" \
+  --set "DAILY_REFRESH_HOUR=8" \
+  --set "DAILY_REFRESH_MINUTE=0" \
+  --set "OPENWEATHER_API_KEY=<your key>" \
+  --set "ODDS_API_KEY=<your key>" \
+  --set "CORS_ORIGINS=https://homeruns.lovable.app"
 ```
 
-## Option B — Render
+`DATABASE_URL` is injected by the Postgres plugin — do not set it manually.
+`OPENWEATHER_API_KEY` / `ODDS_API_KEY` are optional today (no weather/odds
+ingestion is wired yet) but are read from the environment when added.
 
-Push the repo to GitHub, then **New → Blueprint** and pick it. `render.yaml`
-provisions the web service and Postgres. Public URL:
-`https://dingeriq-api.onrender.com`.
+## 4. Deploy + get the URL
 
-## Option C — AWS ECS/Fargate
+```bash
+railway up
+railway domain          # prints e.g. https://dingeriq-api-production.up.railway.app
+```
 
-Use the Phase 12 Terraform (`mlb_deploy.zip`): VPC, Multi-AZ RDS, ALB with
-ACM certificate, Fargate service running this same image.
+On boot the app: creates the schema (`init_db()`), starts APScheduler
+(daily MLB sync + Statcast sync), and kicks off the initial MLB sync in the
+background.
 
-## Option D — Temporary tunnel (testing only)
+## 5. Verify the endpoints
+
+```bash
+API=https://<your-railway-domain>
+curl -s $API/health
+curl -s "$API/games/today"
+curl -s "$API/teams" | head -c 400
+curl -s "$API/players?limit=5"
+curl -s -X POST $API/admin/sync
+curl -s -X POST $API/admin/statcast-sync
+```
+
+## 6. Point the frontend at it
+
+Either paste the URL into the **Connect** field in the demo banner (instant,
+no rebuild), or set it permanently in the project root `.env`:
+
+```
+VITE_API_BASE_URL=https://<your-railway-domain>
+```
+
+Once `GET /health` returns 200, the health monitor exits Demo Mode
+automatically within 30s and re-fetches every query against live Postgres data.
+
+---
+
+# Alternative hosts
+
+## Fly.io
+
+```bash
+cd backend && fly launch --copy-config && fly postgres create && fly deploy
+```
+
+## Render
+
+`render.yaml` in this folder is a ready blueprint — point Render at the repo.
+
+## Quick tunnel (testing only)
 
 ```bash
 cloudflared tunnel --url http://localhost:8000
-# → https://random-words.trycloudflare.com
 ```
-
-Add that origin handling by setting `CORS_ORIGINS` to your frontend URL and
-restarting uvicorn.
-
-## Point the frontend at it
-
-1. Set `VITE_API_BASE_URL=https://dingeriq-api.fly.dev` in the project env and
-   republish, **or**
-2. Paste the URL into the input in the yellow "demo mode" banner — it is stored
-   in `localStorage` and takes effect immediately, no rebuild.
-
-Once `GET /health` returns 200, the health monitor calls `disableDemoMode()`,
-invalidates every query, and the dashboard switches to live data automatically.
-
-## CORS
-
-`app/main.py` allows the origins in `CORS_ORIGINS` plus any `*.lovable.app` /
-`*.lovableproject.com` host via regex, so preview and published URLs both work.

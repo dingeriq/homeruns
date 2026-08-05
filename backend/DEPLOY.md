@@ -1,8 +1,21 @@
 # Deploying the DingerIQ backend to Railway
 
+## Deploying from GitHub (recommended)
+
+1. Railway → New Project → Deploy from GitHub repo.
+2. Service Settings → **Root Directory** = `backend`.
+3. Railway reads `backend/railway.json` + `backend/Procfile` + `backend/nixpacks.toml`,
+   so the start command is detected automatically:
+   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
+4. Add Postgres (`+ New` → Database → Postgres) — `DATABASE_URL` is injected.
+5. Set the variables in step 3 below, then Deploy. Healthcheck hits `/health`.
+
+## CLI alternative
+
 Everything in this folder is Railway-ready. You run these commands (Railway
 requires your own account/credentials, so this step can't be automated from
 Lovable).
+
 
 ## 1. Install + login
 

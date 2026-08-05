@@ -63,9 +63,12 @@ railway up
 railway domain          # prints e.g. https://dingeriq-api-production.up.railway.app
 ```
 
-On boot the app: creates the schema (`init_db()`), starts APScheduler
-(daily MLB sync + Statcast sync), and kicks off the initial MLB sync in the
-background.
+`/health` returns 200 immediately once uvicorn is accepting requests — it never
+waits on the database, MLB sync, Statcast, or the scheduler (all of that runs in
+a background task after startup). Use `/ready` (200 when Postgres answers, 503
+otherwise, plus sync progress) for readiness. Railway's healthcheck stays on
+`/health`.
+
 
 ## 5. Verify the endpoints
 

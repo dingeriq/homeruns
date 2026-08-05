@@ -1,6 +1,7 @@
 """DingerIQ FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from fastapi import FastAPI, Request
@@ -14,6 +15,7 @@ from app.config import settings
 from app.database.session import init_db
 from app.logging_config import configure_logging
 from app.models.schemas import ErrorResponse
+from app.state import startup_state
 from app.services.scheduler import (
     initial_sync_in_background,
     shutdown_scheduler,
@@ -80,16 +82,37 @@ app.include_router(predictions.router)
 app.include_router(admin.router)
 
 
+async def _bootstrap() -> None:
+    """All slow startup work — runs AFTER the server accepts requests."""
+    try:
+        await asyncio.to_thread(init_db)
+        startup_state.schema_ready = True
+        logger.info("Database schema ready")
+    except Exception as exc:
+        startup_state.last_error = f"init_db: {exc}"
+        logger.exception("init_db failed: %s", exc)
+
+    try:
+        start_scheduler()
+        startup_state.scheduler_started = True
+    except Exception as exc:
+        startup_state.last_error = f"scheduler: {exc}"
+        logger.exception("Scheduler failed to start: %s", exc)
+
+    startup_state.initial_sync = "running"
+    try:
+        await initial_sync_in_background()
+    except Exception as exc:
+        startup_state.initial_sync = "failed"
+        startup_state.last_error = f"initial_sync: {exc}"
+        logger.exception("Initial sync scheduling failed: %s", exc)
+
+
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
-    try:
-        init_db()
-        logger.info("Database schema ready")
-    except Exception as exc:
-        logger.exception("init_db failed: %s", exc)
-    start_scheduler()
-    await initial_sync_in_background()
+    # Fire-and-forget: never delay the server becoming ready for /health.
+    asyncio.create_task(_bootstrap())
 
 
 @app.on_event("shutdown")

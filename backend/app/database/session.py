@@ -1,6 +1,7 @@
 """SQLAlchemy engine + session factory."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import contextmanager
 from typing import Iterator
@@ -53,10 +54,13 @@ def session_scope() -> Iterator[Session]:
 
 
 async def check_connection() -> bool:
-    try:
+    def _ping() -> bool:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
+
+    try:
+        return await asyncio.wait_for(asyncio.to_thread(_ping), timeout=8)
     except Exception as exc:
         logger.warning("Database ping failed: %s", exc)
         return False

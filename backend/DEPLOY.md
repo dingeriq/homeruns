@@ -2,13 +2,23 @@
 
 ## Deploying from GitHub (recommended)
 
-1. Railway → New Project → Deploy from GitHub repo.
-2. Service Settings → **Root Directory** = `backend`.
-3. Railway reads `backend/railway.json` + `backend/Procfile` + `backend/nixpacks.toml`,
-   so the start command is detected automatically:
-   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`
-4. Add Postgres (`+ New` → Database → Postgres) — `DATABASE_URL` is injected.
-5. Set the variables in step 3 below, then Deploy. Healthcheck hits `/health`.
+Two supported setups — pick ONE, the build context must match the Dockerfile:
+
+**A. Root Directory = `backend`** (preferred)
+Railway builds with context `backend/` and uses `backend/Dockerfile`
+(`COPY requirements.txt ./`) plus `backend/railway.json`.
+
+**B. Root Directory unset (repo root)**
+Railway builds with the repo root as context and uses the root `railway.json`,
+which points at `Dockerfile.api` (`COPY backend/requirements.txt ./`).
+
+The `not found: /requirements.txt` error means setup A's Dockerfile was used
+with setup B's context — either set Root Directory to `backend`, or clear it so
+the root `railway.json` / `Dockerfile.api` pair is used.
+
+Then: add Postgres (`+ New` → Database → Postgres) — `DATABASE_URL` is injected.
+Set the variables in step 3 below, then Deploy. Healthcheck hits `/health`.
+
 
 ## CLI alternative
 

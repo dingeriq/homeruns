@@ -1,0 +1,12 @@
+node_modules
+dist
+.output
+.git
+.vite
+src
+public
+bun.lock
+**/__pycache__
+*.pyc
+.env
+.env.*

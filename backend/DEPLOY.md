@@ -1,20 +1,21 @@
 # Deploying the DingerIQ backend to Railway
 
-## Deploying from GitHub (recommended)
+## Deploying from GitHub (the one supported setup)
 
-Two supported setups — pick ONE, the build context must match the Dockerfile:
+There is now exactly ONE deployment path — no alternatives, no ambiguity:
 
-**A. Root Directory = `backend`** (preferred)
-Railway builds with context `backend/` and uses `backend/Dockerfile`
-(`COPY requirements.txt ./`) plus `backend/railway.json`.
+- **Root Directory: leave EMPTY** (repository root)
+- Build context: repository root
+- Dockerfile: `Dockerfile.api` at the repo root (declared in the root `railway.json`)
+- It copies `backend/requirements.txt` and `backend/app`, so the paths always
+  resolve against the repo root context Railway actually uses.
 
-**B. Root Directory unset (repo root)**
-Railway builds with the repo root as context and uses the root `railway.json`,
-which points at `Dockerfile.api` (`COPY backend/requirements.txt ./`).
+`backend/Dockerfile`, `backend/railway.json`, `backend/Procfile`,
+`backend/nixpacks.toml` and `backend/runtime.txt` were deleted — they assumed a
+`backend/` build context and caused
+`failed to calculate checksum: "/requirements.txt": not found`.
 
-The `not found: /requirements.txt` error means setup A's Dockerfile was used
-with setup B's context — either set Root Directory to `backend`, or clear it so
-the root `railway.json` / `Dockerfile.api` pair is used.
+If Railway's Settings still show Root Directory = `backend`, clear it and redeploy.
 
 Then: add Postgres (`+ New` → Database → Postgres) — `DATABASE_URL` is injected.
 Set the variables in step 3 below, then Deploy. Healthcheck hits `/health`.

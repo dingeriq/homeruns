@@ -18,7 +18,9 @@ services:
     restart: unless-stopped
 
   api:
-    build: .
+    build:
+      context: ..
+      dockerfile: Dockerfile.api
     container_name: dingeriq-api
     ports:
       - "8000:8000"

@@ -38,7 +38,7 @@ railway login
 ## 2. Create the project and Postgres
 
 ```bash
-cd backend
+cd .   # repo root — Railway must build from the root context
 railway init                 # name it "dingeriq-api"
 railway add --database postgres
 ```
@@ -112,7 +112,7 @@ automatically within 30s and re-fetches every query against live Postgres data.
 ## Fly.io
 
 ```bash
-cd backend && fly launch --copy-config && fly postgres create && fly deploy
+fly launch --copy-config && fly postgres create && fly deploy
 ```
 
 ## Render

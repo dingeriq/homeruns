@@ -9,9 +9,11 @@ function normalize(url: string): string {
   return url.trim().replace(/\/$/, "");
 }
 
+export const PRODUCTION_API_BASE_URL = "https://homeruns-production.up.railway.app";
+
 export const DEFAULT_API_BASE_URL: string =
   normalize((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "") ||
-  "http://localhost:8000";
+  PRODUCTION_API_BASE_URL;
 
 /** Base URL for all API calls: runtime override (client) → env → localhost. */
 export function getApiBaseUrl(): string {

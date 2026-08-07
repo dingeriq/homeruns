@@ -15,12 +15,19 @@ export const DEFAULT_API_BASE_URL: string =
   normalize((import.meta.env.VITE_API_BASE_URL as string | undefined) ?? "") ||
   PRODUCTION_API_BASE_URL;
 
-/** Base URL for all API calls: runtime override (client) → env → localhost. */
+/** Base URL for all API calls: runtime override (client) → env → production. */
 export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
     try {
       const override = window.localStorage.getItem(STORAGE_KEY);
-      if (override) return normalize(override);
+      if (override) {
+        const value = normalize(override);
+        // Ignore stale http:// overrides on an https page — the browser blocks them.
+        const blocked =
+          window.location.protocol === "https:" && value.startsWith("http://");
+        if (value && !blocked) return value;
+        if (blocked) window.localStorage.removeItem(STORAGE_KEY);
+      }
     } catch {
       // ignore storage errors
     }

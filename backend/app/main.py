@@ -111,6 +111,9 @@ async def _bootstrap() -> None:
 @app.on_event("startup")
 async def on_startup() -> None:
     logger.info("Starting %s (env=%s)", settings.app_name, settings.environment)
+    from app.database.session import database_diagnostics
+
+    logger.info("Database config: %s", database_diagnostics())
     # Fire-and-forget: never delay the server becoming ready for /health.
     asyncio.create_task(_bootstrap())
 

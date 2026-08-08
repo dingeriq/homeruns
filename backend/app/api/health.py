@@ -27,6 +27,7 @@ async def ready() -> JSONResponse:
     payload = {
         "status": "ready" if db_ok else "degraded",
         "database": "up" if db_ok else "down",
+        **database_diagnostics(),
         **startup_state.snapshot(),
     }
     return JSONResponse(status_code=200 if db_ok else 503, content=payload)

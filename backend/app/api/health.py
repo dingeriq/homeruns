@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 
-from app.database.session import check_connection
+from app.database.session import check_connection, database_diagnostics
 from app.models.schemas import HealthResponse
 from app.state import startup_state
 

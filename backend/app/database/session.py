@@ -1,17 +1,19 @@
-"""SQLAlchemy engine + session factory."""
+"""SQLAlchemy engine + session factory (lazily created so env vars always win)."""
 from __future__ import annotations
 
 import asyncio
 import logging
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Iterator, Optional
 
 from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from app.config import settings
+from app.config import database_source, resolve_database_url, safe_database_target, settings
 
 logger = logging.getLogger("dingeriq.db")
+
 
 def _normalize_url(url: str) -> str:
     """Railway/Heroku hand out postgres:// or postgresql:// URLs; force psycopg3."""
@@ -22,18 +24,46 @@ def _normalize_url(url: str) -> str:
     return url
 
 
-engine = create_engine(
-    _normalize_url(settings.database_url),
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-    pool_timeout=10,
-    future=True,
-    # Never let a missing/unreachable DB hang a request or startup forever.
-    connect_args={"connect_timeout": 5},
-)
+_engine: Optional[Engine] = None
+_session_factory: Optional[sessionmaker] = None
 
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
+
+def get_engine() -> Engine:
+    """Create the engine on first use, reading DATABASE_URL at that moment."""
+    global _engine, _session_factory
+    if _engine is None:
+        url = resolve_database_url()
+        target = safe_database_target(url)
+        logger.info(
+            "Creating database engine from %s -> host=%s port=%s db=%s",
+            database_source(),
+            target["host"],
+            target["port"],
+            target["database"],
+        )
+        _engine = create_engine(
+            _normalize_url(url),
+            pool_pre_ping=True,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=10,
+            future=True,
+            connect_args={"connect_timeout": 5},
+        )
+        _session_factory = sessionmaker(
+            bind=_engine, autoflush=False, autocommit=False, future=True
+        )
+    return _engine
+
+
+def get_session_factory() -> sessionmaker:
+    get_engine()
+    assert _session_factory is not None
+    return _session_factory
+
+
+def SessionLocal() -> Session:  # noqa: N802 - preserves existing call sites
+    return get_session_factory()()
 
 
 class Base(DeclarativeBase):
@@ -53,20 +83,39 @@ def session_scope() -> Iterator[Session]:
         session.close()
 
 
+def database_diagnostics() -> dict:
+    """Safe diagnostic — never exposes credentials or the full URL."""
+    target = safe_database_target()
+    return {
+        "database_url_present": settings.database_url_is_configured,
+        "database_url_source": database_source(),
+        "database_host": target["host"],
+        "database_port": target["port"],
+        "database_name": target["database"],
+    }
+
+
 async def check_connection() -> bool:
     def _ping() -> bool:
-        with engine.connect() as conn:
+        with get_engine().connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
 
     try:
         return await asyncio.wait_for(asyncio.to_thread(_ping), timeout=8)
     except Exception as exc:
-        logger.warning("Database ping failed: %s", exc)
+        target = safe_database_target()
+        logger.warning(
+            "Database ping failed (host=%s port=%s source=%s): %s",
+            target["host"],
+            target["port"],
+            database_source(),
+            exc,
+        )
         return False
 
 
 def init_db() -> None:
     from app.database import models  # noqa: F401  (register models)
 
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=get_engine())

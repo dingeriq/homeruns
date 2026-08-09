@@ -24,6 +24,14 @@ DATABASE_URL_ENV_VARS = (
     "PG_URL",
 )
 
+SAFE_DATABASE_ENV_VARS = (
+    "DATABASE_URL",
+    "PGHOST",
+    "PGPORT",
+    "PGDATABASE",
+    "PGUSER",
+)
+
 
 def _split_csv(value: str) -> List[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -70,6 +78,15 @@ def database_source() -> str:
     if _database_url_from_parts():
         return "PG* environment parts"
     return "local fallback default"
+
+
+def database_environment_presence() -> dict[str, bool]:
+    """Report only whether safe database variables are non-empty.
+
+    Values are read directly from the running process environment on every
+    call. Passwords and connection-string contents are never returned.
+    """
+    return {name: _env(name) is not None for name in SAFE_DATABASE_ENV_VARS}
 
 
 def safe_database_target(url: Optional[str] = None) -> dict:
@@ -125,7 +142,7 @@ class Settings:
 
     @property
     def database_url_is_configured(self) -> bool:
-        return self.database_url != LOCAL_FALLBACK_DATABASE_URL
+        return database_source() != "local fallback default"
 
 
 settings = Settings()

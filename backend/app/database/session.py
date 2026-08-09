@@ -10,7 +10,12 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
-from app.config import database_source, resolve_database_url, safe_database_target, settings
+from app.config import (
+    database_environment_presence,
+    database_source,
+    resolve_database_url,
+    safe_database_target,
+)
 
 logger = logging.getLogger("dingeriq.db")
 
@@ -84,14 +89,17 @@ def session_scope() -> Iterator[Session]:
 
 
 def database_diagnostics() -> dict:
-    """Safe diagnostic — never exposes credentials or the full URL."""
-    target = safe_database_target()
+    """Runtime-safe diagnostic — never exposes credentials or full URLs."""
+    resolved_url = resolve_database_url()
+    source = database_source()
+    target = safe_database_target(resolved_url)
     return {
-        "database_url_present": settings.database_url_is_configured,
-        "database_url_source": database_source(),
+        "database_url_present": source != "local fallback default",
+        "database_url_source": source,
         "database_host": target["host"],
         "database_port": target["port"],
         "database_name": target["database"],
+        "environment_present": database_environment_presence(),
     }
 
 

@@ -14,6 +14,7 @@ from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 from app.services.park_factors import compute_park_factors
 from app.services.lineups import sync_lineups
+from app.services.odds_service import OddsApiNotConfigured, sync_odds
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 logger = logging.getLogger("dingeriq.scheduler")
@@ -63,6 +64,26 @@ async def _lineup_job() -> None:
         logger.info("Lineup refresh complete: %s", result)
     except Exception as exc:
         logger.exception("Lineup refresh failed: %s", exc)
+
+
+async def _odds_job() -> None:
+    if not settings.odds_is_configured:
+        logger.info("Odds refresh skipped: ODDS_API_KEY not set")
+        return
+    logger.info("Odds refresh starting")
+    try:
+        with track_job("odds_refresh"):
+            result = await sync_odds()
+        record_synced_counts({"odds": result.get("snapshots_stored", 0)})
+        logger.info(
+            "Odds refresh complete: %d snapshots stored (quota remaining %s)",
+            result.get("snapshots_stored", 0),
+            result.get("quota_remaining"),
+        )
+    except OddsApiNotConfigured as exc:
+        logger.warning("Odds refresh skipped: %s", exc)
+    except Exception as exc:
+        logger.exception("Odds refresh failed: %s", exc)
 
 
 async def _weather_job() -> None:
@@ -117,6 +138,15 @@ def start_scheduler() -> None:
         _lineup_job,
         CronTrigger(minute="5,35"),
         id="lineup-refresh",
+        max_instances=1,
+        coalesce=True,
+    )
+    # Conservative cadence: the plan is credit-metered, so refresh a few times
+    # a day (pre-slate + closing lines) rather than polling continuously.
+    sched.add_job(
+        _odds_job,
+        CronTrigger(hour=f"*/{max(1, settings.odds_refresh_hours)}", minute=25),
+        id="odds-refresh",
         max_instances=1,
         coalesce=True,
     )

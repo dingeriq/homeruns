@@ -13,6 +13,7 @@ from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
+from app.services.odds_service import OddsApiNotConfigured, sync_odds
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -81,3 +82,18 @@ async def trigger_lineup_sync(
         result = await sync_lineups(on=on)
     record_synced_counts({"lineups": result.get("lineup_slots_stored", 0)})
     return {"status": "ok", "lineups": result}
+
+
+@router.post("/odds-sync")
+async def trigger_odds_sync(
+    on: Optional[date] = Query(None, description="Slate date to tag snapshots with"),
+    include_player_props: bool = Query(True, description="Also pull per-event HR props"),
+) -> dict:
+    """Ingest sportsbook markets. Snapshots are appended, never overwritten."""
+    try:
+        with track_job("manual_odds_sync"):
+            result = await sync_odds(on=on, include_player_props=include_player_props)
+    except OddsApiNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    record_synced_counts({"odds": result.get("snapshots_stored", 0)})
+    return {"status": "ok", "odds": result}

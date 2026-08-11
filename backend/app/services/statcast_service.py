@@ -91,7 +91,9 @@ class SavantClient:
                         headers={"User-Agent": "DingerIQ/0.1 (statcast ingest)"},
                     )
                     resp.raise_for_status()
-                    return resp.text
+                    # Savant omits a charset in Content-Type; decode explicitly as
+                    # UTF-8 so accented names (Pérez, Sánchez) survive ingestion.
+                    return resp.content.decode("utf-8", errors="replace")
         raise RuntimeError("unreachable")
 
 

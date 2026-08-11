@@ -37,6 +37,7 @@ class GameInfo(BaseModel):
     home_team: str
     away_team: str
     venue: Optional[str] = None
+    venue_id: Optional[int] = None
     status: Optional[str] = None
     home_away: Optional[str] = Field(None, description="'home' or 'away' for this hitter")
     opponent_team: Optional[str] = None

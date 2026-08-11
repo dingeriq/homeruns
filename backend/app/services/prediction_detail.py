@@ -346,6 +346,7 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
             home_team=game_row.home_team,
             away_team=game_row.away_team,
             venue=game_row.venue,
+            venue_id=game_row.venue_id,
             status=game_row.status,
             home_away="home" if is_home else "away",
             opponent_team=game_row.away_team if is_home else game_row.home_team,

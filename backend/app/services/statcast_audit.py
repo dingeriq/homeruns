@@ -75,11 +75,15 @@ def _label(coverage: float | None) -> str:
     return "insufficient"
 
 
-def _coverage_block(session, fields, denominator_sql: str, denominator: int) -> Dict[str, Any]:
+def _coverage_block(
+    session, fields, denominator_sql: str, denominator: int, params: Dict[str, Any] | None = None
+) -> Dict[str, Any]:
     if denominator <= 0:
         return {c: {"filled": 0, "coverage": None, "status": "no_data"} for c in fields}
     sel = ", ".join(f"count({c}) AS {c}" for c in fields)
-    filled = _one(session, f"SELECT {sel} FROM statcast_pitches {denominator_sql}")
+    filled = _one(
+        session, f"SELECT {sel} FROM statcast_pitches {denominator_sql}", **(params or {})
+    )
     out: Dict[str, Any] = {}
     for c in fields:
         cov = _pct(filled.get(c), denominator)
@@ -87,11 +91,37 @@ def _coverage_block(session, fields, denominator_sql: str, denominator: int) -> 
     return out
 
 
-def run_statcast_audit() -> Dict[str, Any]:
+def run_statcast_audit(start: date | None = None, end: date | None = None) -> Dict[str, Any]:
+    """Full-table audit by default; restricted to [start, end] when supplied.
+
+    The range filter is a plain ``game_date`` comparison so PostgreSQL can use
+    the existing ``game_date`` index instead of scanning every pitch — which is
+    what makes this endpoint safe to call during an active historical ingest.
+    Definitions are identical either way; only the row population changes.
+    """
+    params: Dict[str, Any] = {}
+    conds: List[str] = []
+    if start is not None:
+        conds.append("game_date >= :start")
+        params["start"] = start
+    if end is not None:
+        conds.append("game_date <= :end")
+        params["end"] = end
+    # WHERE fragment for queries with no other predicate, AND fragment for the rest.
+    where = (" WHERE " + " AND ".join(conds)) if conds else ""
+    andw = (" AND " + " AND ".join(conds)) if conds else ""
+    sp_where = where.replace("game_date", "sp.game_date")
+    sp_and = andw.replace("game_date", "sp.game_date")
+    date_range = {
+        "start": start.isoformat() if start else None,
+        "end": end.isoformat() if end else None,
+        "scope": "range" if conds else "all",
+    }
+
     with session_scope() as s:
         totals = _one(
             s,
-            """
+            f"""
             SELECT count(*) AS total_pitches,
                    min(game_date) AS first_date,
                    max(game_date) AS last_date,
@@ -102,9 +132,11 @@ def run_statcast_audit() -> Dict[str, Any]:
                    count(*) FILTER (WHERE events = 'home_run') AS home_runs,
                    count(*) FILTER (WHERE events IS NOT NULL) AS plate_appearance_results,
                    count(*) FILTER (WHERE exit_velocity IS NOT NULL) AS batted_balls
-            FROM statcast_pitches
+            FROM statcast_pitches{where}
             """,
+            **params,
         )
+
         total = int(totals.get("total_pitches") or 0)
         if not total:
             return {

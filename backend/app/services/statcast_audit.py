@@ -335,6 +335,7 @@ def run_statcast_audit(start: date | None = None, end: date | None = None) -> Di
 
         return {
             "generated_at": date.today().isoformat(),
+            "date_range": date_range,
             "status": "populated",
             "totals": {
                 **{k: _iso(v) for k, v in totals.items()},

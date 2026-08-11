@@ -14,6 +14,7 @@ no usable slot, no row is written and the game is reported as unavailable.
 from __future__ import annotations
 
 import logging
+import math
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
@@ -43,6 +44,22 @@ _COMPASS = (
 # Forecast slots are 3h apart; anything further from first pitch than this is
 # not a meaningful representation of game conditions.
 MAX_SLOT_DISTANCE = timedelta(hours=3)
+
+
+def wind_out_component(
+    speed_mph: Optional[float], wind_deg: Optional[float], azimuth: Optional[float]
+) -> Optional[float]:
+    """Wind component blowing out to centre field, in mph.
+
+    ``wind_deg`` is the direction the wind comes FROM (OpenWeather convention);
+    ``azimuth`` is the bearing from home plate to centre field (MLB venue
+    location data). Positive = out, negative = in. Null when either input is
+    missing — never guessed.
+    """
+    if speed_mph is None or wind_deg is None or azimuth is None:
+        return None
+    blowing_toward = (float(wind_deg) + 180.0) % 360.0
+    return round(float(speed_mph) * math.cos(math.radians(blowing_toward - float(azimuth))), 2)
 
 
 class OpenWeatherNotConfigured(RuntimeError):
@@ -176,6 +193,7 @@ def _games_needing_weather(on: Optional[Any] = None) -> List[Dict[str, Any]]:
                 models.Venue.latitude,
                 models.Venue.longitude,
                 models.Venue.roof_type,
+                models.Venue.azimuth_angle,
             )
             .outerjoin(models.Venue, models.Venue.id == models.Game.venue_id)
             .where(models.Game.game_date == day)
@@ -190,6 +208,7 @@ def _games_needing_weather(on: Optional[Any] = None) -> List[Dict[str, Any]]:
             "latitude": r[4],
             "longitude": r[5],
             "roof_type": r[6],
+            "azimuth_angle": r[7],
         }
         for r in rows
     ]
@@ -262,6 +281,9 @@ async def sync_weather(on: Optional[Any] = None) -> Dict[str, Any]:
                 ),
                 "is_forecast": not use_current,
                 "roof_status": roof_status_for(game["roof_type"]),
+                "wind_out_mph": wind_out_component(
+                    row.get("wind_speed_mph"), row.get("wind_deg"), game["azimuth_angle"]
+                ),
                 "source": "openweather/current" if use_current else "openweather/forecast",
                 "fetched_at": now,
             }
@@ -288,7 +310,7 @@ WEATHER_FIELDS = (
     "game_id", "venue_id", "venue_name", "game_datetime", "forecast_time",
     "forecast_offset_minutes", "is_forecast", "temperature_f", "feels_like_f",
     "humidity_pct", "pressure_hpa", "wind_speed_mph", "wind_gust_mph",
-    "wind_deg", "wind_direction", "cloud_pct", "precipitation_prob",
+    "wind_deg", "wind_direction", "wind_out_mph", "cloud_pct", "precipitation_prob",
     "conditions", "description", "roof_status", "source", "fetched_at",
 )
 

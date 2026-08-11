@@ -126,6 +126,10 @@ class Venue(Base):
     longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     roof_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Bearing (deg) from home plate to centre field — lets wind direction be
+    # resolved into an out-to-centre component.
+    azimuth_angle: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    elevation_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
 
 class GameWeather(Base):
@@ -149,6 +153,8 @@ class GameWeather(Base):
     wind_gust_mph: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     wind_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     wind_direction: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    # Positive = blowing out to centre field, negative = blowing in.
+    wind_out_mph: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     cloud_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     precipitation_prob: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     conditions: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)

@@ -63,6 +63,7 @@ class GameWeatherResponse(BaseModel):
     wind_gust_mph: Optional[float] = None
     wind_deg: Optional[float] = None
     wind_direction: Optional[str] = None
+    wind_out_mph: Optional[float] = None
     cloud_pct: Optional[float] = None
     precipitation_prob: Optional[float] = None
     conditions: Optional[str] = None

@@ -62,6 +62,7 @@ def _to_response(game: models.Game, weather: Optional[dict]) -> GameWeatherRespo
                     "wind_gust_mph",
                     "wind_deg",
                     "wind_direction",
+                    "wind_out_mph",
                     "cloud_pct",
                     "precipitation_prob",
                     "conditions",

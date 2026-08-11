@@ -111,6 +111,8 @@ async def sync_venues(client: MLBStatsClient) -> int:
                 "longitude": coords.get("longitude"),
                 "timezone": ((v.get("timeZone") or {}).get("id")),
                 "roof_type": ((v.get("fieldInfo") or {}).get("roofType")),
+                "azimuth_angle": location.get("azimuthAngle"),
+                "elevation_ft": location.get("elevation"),
             }
         )
     with session_scope() as s:

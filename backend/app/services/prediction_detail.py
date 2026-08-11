@@ -437,8 +437,7 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
     feature_values: Dict[str, Optional[float]] = {slot: None for slot in FEATURE_SLOTS}
     if weather_row:
         feature_values["weather_temperature_f"] = weather_row.get("temperature_f")
-        # weather_wind_out_component stays null: it needs each park's outfield
-        # orientation (azimuth), which is not ingested yet.
+        feature_values["weather_wind_out_component"] = weather_row.get("wind_out_mph")
     if hitter_metrics:
         feature_values["batter_barrel_rate"] = hitter_metrics.barrel_rate
         feature_values["batter_hard_hit_rate"] = hitter_metrics.hard_hit_rate

@@ -11,6 +11,7 @@ from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
 from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
+from app.services.statcast_audit import run_statcast_audit
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 from app.services.odds_service import OddsApiNotConfigured, sync_odds
@@ -27,6 +28,17 @@ async def data_audit() -> dict:
     except Exception as exc:  # database down / schema missing
         raise HTTPException(status_code=503, detail=f"audit unavailable: {type(exc).__name__}")
 
+
+
+@router.get("/statcast-audit")
+async def statcast_audit() -> dict:
+    """Read-only, deep Statcast coverage + trainability audit."""
+    try:
+        return await asyncio.to_thread(run_statcast_audit)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"statcast audit unavailable: {type(exc).__name__}"
+        )
 
 
 @router.post("/sync")

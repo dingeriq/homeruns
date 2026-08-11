@@ -54,16 +54,23 @@ def discover_missing_ids(session) -> Dict[int, int | None]:
     The season comes from the Statcast ``game_date`` the id was last observed
     in — it is observed, never invented.
     """
-    sql = """
+    dialect = session.get_bind().dialect.name
+    # Same semantics either way; SQLite (tests) has no extract()/cast syntax.
+    season_expr = (
+        "CAST(strftime('%Y', game_date) AS INTEGER)"
+        if dialect == "sqlite"
+        else "extract(year FROM game_date)::int"
+    )
+    sql = f"""
         SELECT person_id, max(season) AS last_season
         FROM (
             SELECT batter_id AS person_id,
-                   extract(year FROM game_date)::int AS season
+                   {season_expr} AS season
             FROM statcast_pitches
             WHERE batter_id IS NOT NULL
             UNION ALL
             SELECT pitcher_id AS person_id,
-                   extract(year FROM game_date)::int AS season
+                   {season_expr} AS season
             FROM statcast_pitches
             WHERE pitcher_id IS NOT NULL
         ) s

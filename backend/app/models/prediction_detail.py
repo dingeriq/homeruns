@@ -165,6 +165,8 @@ class LineupInfo(BaseModel):
 class MarketOdds(BaseModel):
     """Sportsbook benchmark. Never an input to the DingerIQ probability."""
 
+    model_config = {"protected_namespaces": ()}
+
     status: Optional[str] = Field(None, description="'available' | 'unavailable'")
     market: Optional[str] = None
     best_price: Optional[float] = None

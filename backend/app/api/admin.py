@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
+from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
 from app.services.statcast_audit import run_statcast_audit
@@ -27,6 +28,18 @@ async def data_audit() -> dict:
         return await asyncio.to_thread(run_audit)
     except Exception as exc:  # database down / schema missing
         raise HTTPException(status_code=503, detail=f"audit unavailable: {type(exc).__name__}")
+
+
+@router.get("/db-usage")
+async def db_usage() -> dict:
+    """Read-only PostgreSQL resource usage: size, indexes, connections, load."""
+    try:
+        return await asyncio.to_thread(run_db_usage)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"db usage unavailable: {type(exc).__name__}"
+        )
+
 
 
 

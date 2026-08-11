@@ -92,6 +92,95 @@ database_up = Gauge(
     registry=REGISTRY,
 )
 
+database_connection_checks_total = Counter(
+    "dingeriq_database_connection_checks_total",
+    "Database connectivity checks by outcome.",
+    ("outcome",),
+    registry=REGISTRY,
+)
+
+database_connection_failures_total = Counter(
+    "dingeriq_database_connection_failures_total",
+    "Database connection failures (ping or query).",
+    ("operation",),
+    registry=REGISTRY,
+)
+
+mlb_api_requests_total = Counter(
+    "dingeriq_mlb_api_requests_total",
+    "Requests to the MLB Stats API by endpoint and outcome.",
+    ("endpoint", "outcome"),
+    registry=REGISTRY,
+)
+
+mlb_api_request_failures_total = Counter(
+    "dingeriq_mlb_api_request_failures_total",
+    "Failed MLB Stats API requests by endpoint and error class.",
+    ("endpoint", "error"),
+    registry=REGISTRY,
+)
+
+mlb_api_request_duration_seconds = Histogram(
+    "dingeriq_mlb_api_request_duration_seconds",
+    "MLB Stats API request latency in seconds.",
+    ("endpoint",),
+    buckets=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20),
+    registry=REGISTRY,
+)
+
+sync_last_start_timestamp = Gauge(
+    "dingeriq_sync_last_start_timestamp_seconds",
+    "Unix timestamp when a sync job last started.",
+    ("job",),
+    registry=REGISTRY,
+)
+
+sync_last_end_timestamp = Gauge(
+    "dingeriq_sync_last_end_timestamp_seconds",
+    "Unix timestamp when a sync job last finished (success or failure).",
+    ("job",),
+    registry=REGISTRY,
+)
+
+sync_last_duration_seconds = Gauge(
+    "dingeriq_sync_last_duration_seconds",
+    "Duration of the most recent run of a sync job.",
+    ("job",),
+    registry=REGISTRY,
+)
+
+sync_in_progress = Gauge(
+    "dingeriq_sync_in_progress",
+    "1 while a sync job is running.",
+    ("job",),
+    registry=REGISTRY,
+)
+
+sync_last_entity_count = Gauge(
+    "dingeriq_sync_last_entity_count",
+    "Rows written by the most recent sync, per entity (games, teams, players).",
+    ("entity",),
+    registry=REGISTRY,
+)
+
+scheduler_up = Gauge(
+    "dingeriq_scheduler_up",
+    "1 when the APScheduler instance is running.",
+    registry=REGISTRY,
+)
+
+initial_sync_status = Gauge(
+    "dingeriq_initial_sync_status",
+    "Initial sync state: 0=pending, 1=running, 2=complete, 3=failed.",
+    registry=REGISTRY,
+)
+
+schema_ready = Gauge(
+    "dingeriq_schema_ready",
+    "1 when the database schema has been created/verified.",
+    registry=REGISTRY,
+)
+
 process_start_time = Gauge(
     "dingeriq_process_start_time_seconds",
     "Unix timestamp of process start.",
@@ -101,6 +190,8 @@ process_start_time.set(time.time())
 
 _STARTED_AT = time.time()
 
+INITIAL_SYNC_STATES = {"pending": 0, "running": 1, "complete": 2, "failed": 3}
+
 # --- lightweight in-process snapshot (for /metrics/summary) -----------------
 
 _lock = Lock()
@@ -108,8 +199,14 @@ _request_count = 0
 _error_count = 0
 _latency_sum = 0.0
 _status_counts: Dict[str, int] = defaultdict(int)
+_status_class_counts: Dict[str, int] = defaultdict(int)
+_route_stats: Dict[str, Dict[str, float]] = {}
 _route_counts: Dict[str, int] = defaultdict(int)
 _jobs: Dict[str, Dict[str, Any]] = {}
+_db_failures = 0
+_mlb_failures = 0
+_entity_counts: Dict[str, int] = {}
+
 
 
 def normalize_path(raw_path: str, route_path: Optional[str] = None) -> str:

@@ -162,6 +162,27 @@ class LineupInfo(BaseModel):
     reason: Optional[str] = None
 
 
+class MarketOdds(BaseModel):
+    """Sportsbook benchmark. Never an input to the DingerIQ probability."""
+
+    status: Optional[str] = Field(None, description="'available' | 'unavailable'")
+    market: Optional[str] = None
+    best_price: Optional[float] = None
+    odds_format: Optional[str] = None
+    sportsbook: Optional[str] = None
+    sportsbook_title: Optional[str] = None
+    implied_probability: Optional[float] = None
+    no_vig_probability: Optional[float] = None
+    consensus_implied_probability: Optional[float] = None
+    under_no_price: Optional[float] = None
+    sportsbook_count: Optional[int] = None
+    last_updated: Optional[str] = None
+    # DingerIQ probability minus market implied probability. Stays null until a
+    # real model exists; no betting recommendation is derived here.
+    model_vs_market_edge: Optional[float] = None
+    reason: Optional[str] = None
+
+
 class ModelFeatures(BaseModel):
     """Named feature slots the model will consume. Values are null until the
     feature pipeline is materialised."""
@@ -213,6 +234,7 @@ class PredictionDetail(BaseModel):
     park_factors: Optional[ParkFactors] = None
     weather: Optional[WeatherFactors] = None
     lineup: Optional[LineupInfo] = None
+    market_odds: Optional[MarketOdds] = None
     model_features: ModelFeatures
     prediction: PredictionResult
     explanation: Explanation
@@ -235,6 +257,7 @@ __all__ = [
     "ParkFactors",
     "WeatherFactors",
     "ModelFeatures",
+    "MarketOdds",
     "PredictionResult",
     "ExplanationFactor",
     "Explanation",

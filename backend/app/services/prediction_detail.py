@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.database import models
 from app.services.lineups import lineup_slot_for_player
+from app.services.odds_service import market_for_player
 from app.services.park_factors import park_factors_for_venue
 from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
@@ -27,6 +28,7 @@ from app.models.prediction_detail import (
     GameInfo,
     HitterMetrics,
     LineupInfo,
+    MarketOdds,
     MatchupInfo,
     ModelFeatures,
     ParkFactors,
@@ -489,6 +491,41 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         unavailable.append("lineup")
         notes["lineup"] = lineup.reason or ""
 
+    try:
+        market_row = market_for_player(
+            session, player_row.id, game.game_id if game else None
+        )
+    except Exception:  # odds tables absent / unreachable — never fatal
+        market_row = None
+    if market_row:
+        market_odds = MarketOdds(
+            status="available",
+            market=market_row.get("market"),
+            best_price=market_row.get("price"),
+            odds_format=market_row.get("odds_format"),
+            sportsbook=market_row.get("bookmaker"),
+            sportsbook_title=market_row.get("bookmaker_title"),
+            implied_probability=market_row.get("implied_probability"),
+            no_vig_probability=market_row.get("no_vig_probability"),
+            consensus_implied_probability=market_row.get("consensus_implied_probability"),
+            under_no_price=market_row.get("under_no_price"),
+            sportsbook_count=market_row.get("sportsbook_count"),
+            last_updated=market_row.get("last_updated"),
+            # No trained model -> no edge. Market data never becomes the model.
+            model_vs_market_edge=None,
+        )
+        available.append("market_odds")
+    else:
+        market_odds = MarketOdds(
+            status="unavailable",
+            reason=(
+                "No sportsbook HR market stored for this hitter. Run POST /admin/odds-sync "
+                "once books post player props for the slate."
+            ),
+        )
+        unavailable.append("market_odds")
+        notes["market_odds"] = market_odds.reason or ""
+
     feature_values: Dict[str, Optional[float]] = {slot: None for slot in FEATURE_SLOTS}
     if lineup_row:
         if lineup_row.get("batting_order") is not None:
@@ -570,6 +607,7 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         park_factors=park_factors,
         weather=weather,
         lineup=lineup,
+        market_odds=market_odds,
         model_features=model_features,
         prediction=prediction,
         explanation=explanation,

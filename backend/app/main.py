@@ -58,10 +58,27 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def access_log(request: Request, call_next):
-    response = await call_next(request)
-    logger.info("%s %s -> %s", request.method, request.url.path, response.status_code)
-    return response
+async def access_log_and_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    http_requests_in_progress.inc()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    except Exception:
+        record_exception(request.url.path)
+        raise
+    finally:
+        http_requests_in_progress.dec()
+        duration = time.perf_counter() - started
+        route = request.scope.get("route")
+        path = normalize_path(request.url.path, getattr(route, "path", None))
+        record_request(request.method, path, status, duration)
+        logger.info(
+            "%s %s -> %s (%.1fms)", request.method, request.url.path, status, duration * 1000
+        )
+
 
 
 @app.exception_handler(StarletteHTTPException)

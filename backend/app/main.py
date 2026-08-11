@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,11 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import admin, games, health, players, predictions, teams
+from app.api import admin, games, health, metrics, players, predictions, teams
 from app.config import settings
 from app.database.session import init_db
 from app.logging_config import configure_logging
 from app.models.schemas import ErrorResponse
+from app.monitoring import (
+    http_requests_in_progress,
+    normalize_path,
+    record_exception,
+    record_request,
+    track_job,
+)
 from app.state import startup_state
 from app.services.scheduler import (
     initial_sync_in_background,

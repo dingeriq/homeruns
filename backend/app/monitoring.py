@@ -390,8 +390,26 @@ def summary() -> Dict[str, Any]:
         errors = _error_count
         latency_sum = _latency_sum
         statuses = dict(_status_counts)
-        routes = dict(sorted(_route_counts.items(), key=lambda kv: -kv[1])[:10])
+        status_classes = dict(_status_class_counts)
         jobs = {k: dict(v) for k, v in _jobs.items()}
+        db_failures = _db_failures
+        mlb_failures = _mlb_failures
+        entity_counts = dict(_entity_counts)
+        endpoints = {
+            key: {
+                "count": int(stat["count"]),
+                "avg_latency_ms": round((stat["latency_sum"] / stat["count"]) * 1000, 2),
+                "max_latency_ms": round(stat["max_latency"] * 1000, 2),
+                "errors": int(stat["errors"]),
+            }
+            for key, stat in sorted(_route_stats.items(), key=lambda kv: -kv[1]["count"])
+        }
+
+    sync_jobs = {k: v for k, v in jobs.items() if "sync" in k or "refresh" in k or "ingest" in k}
+    last_success = max(
+        (v.get("last_success_at", 0) for v in sync_jobs.values()),
+        default=0,
+    )
     return {
         "uptime_seconds": round(time.time() - _STARTED_AT, 1),
         "requests_total": requests,
@@ -399,6 +417,19 @@ def summary() -> Dict[str, Any]:
         "error_rate": round(errors / requests, 4) if requests else 0.0,
         "avg_latency_ms": round((latency_sum / requests) * 1000, 2) if requests else 0.0,
         "status_counts": statuses,
-        "top_routes": routes,
+        "status_classes": status_classes,
+        "endpoints": endpoints,
+        "top_routes": {k: v["count"] for k, v in list(endpoints.items())[:10]},
         "jobs": jobs,
+        "database": {
+            "up": bool(database_up._value.get()),  # type: ignore[attr-defined]
+            "connection_failures": db_failures,
+        },
+        "mlb_api": {"request_failures": mlb_failures},
+        "sync": {
+            "last_success_at": last_success or None,
+            "entity_counts": entity_counts,
+            "jobs": sync_jobs,
+        },
     }
+

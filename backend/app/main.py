@@ -114,6 +114,7 @@ app.include_router(predictions.router)
 app.include_router(admin.router)
 app.include_router(weather.router)
 app.include_router(park_factors.router)
+app.include_router(lineups.router)
 app.include_router(metrics.router)
 
 

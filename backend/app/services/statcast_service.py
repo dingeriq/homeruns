@@ -30,6 +30,12 @@ logger = logging.getLogger("dingeriq.statcast")
 
 _TIMEOUT = httpx.Timeout(120.0, connect=10.0)
 _CHUNK = 500
+# Baseball Savant hard-caps a CSV export at 25,000 rows and truncates silently.
+# A full MLB day is ~4,500 pitches, so 2-day windows stay well under the cap.
+_WINDOW_DAYS = 2
+_SAVANT_ROW_CAP = 25000
+
+
 
 BARREL_VALUES = {"barrel", "6"}
 
@@ -186,21 +192,104 @@ async def sync_statcast(
     start: date | None = None,
     end: date | None = None,
     season: int | None = None,
+    window_days: int | None = None,
 ) -> Dict[str, Any]:
-    """Ingest raw Statcast pitches for a date range (default: yesterday+today)."""
+    """Ingest raw Statcast pitches for a date range (default: yesterday+today).
+
+    The range is fetched in small date windows and each window is written to
+    Postgres before the next one is requested, so a long backfill is chunked,
+    resumable (re-running any range is an idempotent upsert on ``pitch_uid``)
+    and never holds a season-sized CSV in memory. A failing window is recorded
+    and skipped — no rows are fabricated or imputed.
+    """
     end = end or date.today()
     start = start or (end - timedelta(days=settings.statcast_lookback_days))
     season = season or settings.mlb_season
+    step = max(1, window_days or _WINDOW_DAYS)
 
     client = SavantClient()
-    csv_text = await client.search_csv(start, end, season)
-    rows = parse_rows(csv_text)
-    stored = store_pitches(rows)
-    logger.info("Statcast: parsed %d rows, stored %d (%s..%s)", len(rows), stored, start, end)
+    total_parsed = 0
+    total_stored = 0
+    windows: List[Dict[str, Any]] = []
+    errors: List[Dict[str, str]] = []
+
+    truncated: List[Dict[str, str]] = []
+    pending: List[tuple[date, date]] = []
+    cursor = start
+    while cursor <= end:
+        w_end = min(cursor + timedelta(days=step - 1), end)
+        pending.append((cursor, w_end))
+        cursor = w_end + timedelta(days=1)
+
+    while pending:
+        w_start, w_end = pending.pop(0)
+        try:
+            csv_text = await client.search_csv(w_start, w_end, season)
+            rows = parse_rows(csv_text)
+        except Exception as exc:  # network, Savant 5xx, parse failure
+            logger.exception("Statcast window %s..%s failed", w_start, w_end)
+            errors.append(
+                {
+                    "start": w_start.isoformat(),
+                    "end": w_end.isoformat(),
+                    "error": type(exc).__name__,
+                }
+            )
+            continue
+
+        # Savant silently truncates at the export cap — split and refetch
+        # rather than storing a partial window.
+        if len(rows) >= _SAVANT_ROW_CAP and w_start < w_end:
+            mid = w_start + timedelta(days=(w_end - w_start).days // 2)
+            logger.warning(
+                "Statcast window %s..%s hit the %d-row export cap; splitting",
+                w_start,
+                w_end,
+                _SAVANT_ROW_CAP,
+            )
+            pending.insert(0, (mid + timedelta(days=1), w_end))
+            pending.insert(0, (w_start, mid))
+            continue
+        if len(rows) >= _SAVANT_ROW_CAP:
+            truncated.append({"start": w_start.isoformat(), "end": w_end.isoformat()})
+
+        stored = store_pitches(rows)
+        total_parsed += len(rows)
+        total_stored += stored
+        windows.append(
+            {
+                "start": w_start.isoformat(),
+                "end": w_end.isoformat(),
+                "rows_parsed": len(rows),
+                "rows_stored": stored,
+            }
+        )
+        logger.info(
+            "Statcast window %s..%s: parsed %d, stored %d", w_start, w_end, len(rows), stored
+        )
+
+
+
+    logger.info(
+        "Statcast: parsed %d rows, stored %d (%s..%s, %d windows, %d errors)",
+        total_parsed,
+        total_stored,
+        start,
+        end,
+        len(windows),
+        len(errors),
+    )
     return {
         "start": start.isoformat(),
         "end": end.isoformat(),
         "season": season,
-        "rows_parsed": len(rows),
-        "rows_stored": stored,
+        "window_days": step,
+        "windows": len(windows),
+        "rows_parsed": total_parsed,
+        "rows_stored": total_stored,
+        "errors": errors,
+        "truncated_windows": truncated,
+        "window_detail": windows,
+
     }
+

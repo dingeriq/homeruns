@@ -44,14 +44,24 @@ async def db_usage() -> dict:
 
 
 @router.get("/statcast-audit")
-async def statcast_audit() -> dict:
-    """Read-only, deep Statcast coverage + trainability audit."""
+async def statcast_audit(
+    start: Optional[date] = Query(None, description="Restrict aggregates to game_date >= start"),
+    end: Optional[date] = Query(None, description="Restrict aggregates to game_date <= end"),
+) -> dict:
+    """Read-only, deep Statcast coverage + trainability audit.
+
+    Without start/end this audits the whole table. Supplying a range uses the
+    indexed game_date filter, which keeps the query cheap during an ingest.
+    """
+    if start and end and start > end:
+        raise HTTPException(status_code=400, detail="start must be on or before end")
     try:
-        return await asyncio.to_thread(run_statcast_audit)
+        return await asyncio.to_thread(run_statcast_audit, start, end)
     except Exception as exc:
         raise HTTPException(
             status_code=503, detail=f"statcast audit unavailable: {type(exc).__name__}"
         )
+
 
 
 @router.post("/sync")

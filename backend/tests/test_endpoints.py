@@ -266,3 +266,104 @@ def test_metrics_endpoints_never_leak_secrets(client):
     blob = (client.get("/metrics").text + client.get("/metrics/summary").text).lower()
     for needle in ("postgresql://", "postgres://", "pgpassword", "password=", "api_key", "secret"):
         assert needle not in blob
+
+
+def test_statcast_sync_reuses_one_session(monkeypatch) -> None:
+    """A multi-window sync must open exactly one database session."""
+    import asyncio
+    from datetime import date
+
+    from app.services import statcast_service as svc
+
+    opened: list[object] = []
+
+    class FakeSession:
+        def commit(self) -> None:  # pragma: no cover - trivial
+            pass
+
+        def rollback(self) -> None:  # pragma: no cover - trivial
+            pass
+
+        def close(self) -> None:
+            pass
+
+    def fake_session_local():
+        s = FakeSession()
+        opened.append(s)
+        return s
+
+    seen_sessions: list[object] = []
+
+    def fake_store(session, rows):
+        seen_sessions.append(session)
+        return len(rows)
+
+    async def fake_csv(self, start, end, season):  # noqa: ANN001
+        return "csv"
+
+    monkeypatch.setattr(svc, "SessionLocal", fake_session_local)
+    monkeypatch.setattr(svc, "store_pitches_with_session", fake_store)
+    monkeypatch.setattr(svc.SavantClient, "search_csv", fake_csv)
+    monkeypatch.setattr(svc, "parse_rows", lambda text: [{"pitch_uid": "a"}])
+
+    result = asyncio.run(
+        svc.sync_statcast(
+            start=date(2024, 4, 1),
+            end=date(2024, 4, 8),
+            season=2024,
+            window_days=2,
+            pause_seconds=0,
+        )
+    )
+
+    assert result["windows"] == 4
+    assert len(opened) == 1
+    assert seen_sessions and all(s is opened[0] for s in seen_sessions)
+
+
+def test_statcast_sync_window_failure_is_retryable(monkeypatch) -> None:
+    """A failing window is recorded and skipped; the rest still ingest."""
+    import asyncio
+    from datetime import date
+
+    from app.services import statcast_service as svc
+
+    class FakeSession:
+        def commit(self) -> None:
+            pass
+
+        def rollback(self) -> None:
+            pass
+
+        def close(self) -> None:
+            pass
+
+    calls = {"n": 0}
+
+    def fake_store(session, rows):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("db blip")
+        return len(rows)
+
+    async def fake_csv(self, start, end, season):  # noqa: ANN001
+        return "csv"
+
+    monkeypatch.setattr(svc, "SessionLocal", lambda: FakeSession())
+    monkeypatch.setattr(svc, "store_pitches_with_session", fake_store)
+    monkeypatch.setattr(svc.SavantClient, "search_csv", fake_csv)
+    monkeypatch.setattr(svc, "parse_rows", lambda text: [{"pitch_uid": "a"}])
+
+    result = asyncio.run(
+        svc.sync_statcast(
+            start=date(2024, 4, 1),
+            end=date(2024, 4, 4),
+            season=2024,
+            window_days=2,
+            pause_seconds=0,
+        )
+    )
+
+    assert len(result["errors"]) == 1
+    assert result["errors"][0]["start"] == "2024-04-01"
+    assert result["windows"] == 1

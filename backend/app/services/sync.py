@@ -79,6 +79,7 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
                     "home_team_id": home_team.get("id"),
                     "away_team_id": away_team.get("id"),
                     "venue": venue,
+                    "venue_id": (g.get("venue") or {}).get("id"),
                     "status": (g.get("status") or {}).get("detailedState", "Scheduled"),
                     "home_probable_pitcher": (home.get("probablePitcher") or {}).get("fullName"),
                     "away_probable_pitcher": (away.get("probablePitcher") or {}).get("fullName"),
@@ -89,6 +90,32 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
     with session_scope() as s:
         n = _upsert(s, models.Game, rows, "game_id")
     logger.info("Synced %d games for %s", n, on.isoformat())
+    return n
+
+
+async def sync_venues(client: MLBStatsClient) -> int:
+    """Cache MLB venues with the coordinates weather lookups need."""
+    data = await client.venues()
+    rows: List[Dict[str, Any]] = []
+    for v in data.get("venues", []):
+        location = v.get("location") or {}
+        coords = location.get("defaultCoordinates") or {}
+        rows.append(
+            {
+                "id": v["id"],
+                "name": v.get("name", ""),
+                "city": location.get("city"),
+                "state": location.get("stateAbbrev") or location.get("state"),
+                "country": location.get("country"),
+                "latitude": coords.get("latitude"),
+                "longitude": coords.get("longitude"),
+                "timezone": ((v.get("timeZone") or {}).get("id")),
+                "roof_type": ((v.get("fieldInfo") or {}).get("roofType")),
+            }
+        )
+    with session_scope() as s:
+        n = _upsert(s, models.Venue, rows, "id")
+    logger.info("Synced %d venues", n)
     return n
 
 
@@ -192,6 +219,11 @@ async def run_full_sync() -> Dict[str, int]:
     counts: Dict[str, int] = {}
     counts["teams"] = await sync_teams(client)
     counts["games"] = await sync_games(client)
+    try:
+        counts["venues"] = await sync_venues(client)
+    except Exception as exc:
+        logger.exception("Venue sync failed: %s", exc)
+        counts["venues"] = 0
     try:
         counts["players"] = await sync_players(client)
     except Exception as exc:

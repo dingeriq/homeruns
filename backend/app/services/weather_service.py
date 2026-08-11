@@ -284,10 +284,32 @@ async def sync_weather(on: Optional[Any] = None) -> Dict[str, Any]:
     return result
 
 
-def weather_for_game(game_id: int) -> Optional[models.GameWeather]:
+WEATHER_FIELDS = (
+    "game_id", "venue_id", "venue_name", "game_datetime", "forecast_time",
+    "forecast_offset_minutes", "is_forecast", "temperature_f", "feels_like_f",
+    "humidity_pct", "pressure_hpa", "wind_speed_mph", "wind_gust_mph",
+    "wind_deg", "wind_direction", "cloud_pct", "precipitation_prob",
+    "conditions", "description", "roof_status", "source", "fetched_at",
+)
+
+
+def weather_for_game(game_id: int) -> Optional[Dict[str, Any]]:
+    """Stored weather for one game as a plain dict (None when not ingested)."""
     with session_scope() as s:
         row = s.get(models.GameWeather, game_id)
         if row is None:
             return None
-        s.expunge(row)
-        return row
+        return {field: getattr(row, field) for field in WEATHER_FIELDS}
+
+
+def weather_for_games(game_ids: List[int]) -> Dict[int, Dict[str, Any]]:
+    if not game_ids:
+        return {}
+    with session_scope() as s:
+        rows = s.execute(
+            select(models.GameWeather).where(models.GameWeather.game_id.in_(game_ids))
+        ).scalars().all()
+        return {
+            row.game_id: {field: getattr(row, field) for field in WEATHER_FIELDS}
+            for row in rows
+        }

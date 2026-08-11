@@ -145,6 +145,7 @@ def init_db() -> None:
 _COLUMN_MIGRATIONS = (
     ("games", "home_probable_pitcher_id", "INTEGER"),
     ("games", "away_probable_pitcher_id", "INTEGER"),
+    ("games", "venue_id", "INTEGER"),
 )
 
 

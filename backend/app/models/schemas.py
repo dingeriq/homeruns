@@ -42,6 +42,36 @@ class Game(BaseModel):
 
 
 
+class GameWeatherResponse(BaseModel):
+    game_id: int
+    game_datetime: Optional[datetime] = None
+    venue: Optional[str] = None
+    venue_id: Optional[int] = None
+    home_team: Optional[str] = None
+    away_team: Optional[str] = None
+    status: str = Field(..., description="available | unavailable")
+    reason: Optional[str] = None
+
+    forecast_time: Optional[datetime] = None
+    forecast_offset_minutes: Optional[int] = None
+    is_forecast: Optional[bool] = None
+    temperature_f: Optional[float] = None
+    feels_like_f: Optional[float] = None
+    humidity_pct: Optional[float] = None
+    pressure_hpa: Optional[float] = None
+    wind_speed_mph: Optional[float] = None
+    wind_gust_mph: Optional[float] = None
+    wind_deg: Optional[float] = None
+    wind_direction: Optional[str] = None
+    cloud_pct: Optional[float] = None
+    precipitation_prob: Optional[float] = None
+    conditions: Optional[str] = None
+    description: Optional[str] = None
+    roof_status: Optional[str] = None
+    source: Optional[str] = None
+    fetched_at: Optional[datetime] = None
+
+
 class Prediction(BaseModel):
     player_id: int
     player_name: str
@@ -60,6 +90,7 @@ __all__ = [
     "Team",
     "Player",
     "Game",
+    "GameWeatherResponse",
     "Prediction",
     "ErrorResponse",
     "List",

@@ -25,10 +25,17 @@ from app.services.scheduler import (
 configure_logging()
 logger = logging.getLogger("dingeriq.api")
 
+class UTF8JSONResponse(JSONResponse):
+    """JSON responses with an explicit UTF-8 charset for accented text."""
+
+    media_type = "application/json; charset=utf-8"
+
+
 app = FastAPI(
     title=settings.app_name,
     version="0.1.0",
     description="DingerIQ backend — MLB home run prediction platform.",
+    default_response_class=UTF8JSONResponse,
 )
 
 app.add_middleware(

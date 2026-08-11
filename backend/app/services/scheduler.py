@@ -12,6 +12,7 @@ from app.monitoring import record_scheduler_status, record_synced_counts, track_
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
+from app.services.park_factors import compute_park_factors
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 logger = logging.getLogger("dingeriq.scheduler")

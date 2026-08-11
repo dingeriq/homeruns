@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
+from app.services.park_factors import compute_park_factors
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
@@ -59,3 +60,12 @@ async def trigger_weather_sync(
         raise HTTPException(status_code=503, detail=str(exc))
     record_synced_counts({"weather": result.get("weather_stored", 0)})
     return {"status": "ok", "weather": result}
+
+
+@router.post("/park-factors-sync")
+async def trigger_park_factor_sync() -> dict:
+    """Recompute venue HR factors (overall + by batter handedness) from Statcast."""
+    with track_job("manual_park_factor_sync"):
+        result = await asyncio.to_thread(compute_park_factors)
+    record_synced_counts({"park_factors": result.get("park_factors_stored", 0)})
+    return {"status": "ok", "park_factors": result}

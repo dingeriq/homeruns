@@ -54,13 +54,17 @@ async def trigger_statcast_sync(
     start: Optional[date] = Query(None, description="Start game date (inclusive)"),
     end: Optional[date] = Query(None, description="End game date (inclusive)"),
     season: Optional[int] = Query(None, description="Season year for the Savant query"),
+    window_days: Optional[int] = Query(
+        None, ge=1, le=31, description="Fetch window size in days (default 7)"
+    ),
 ) -> dict:
     if start and end and start > end:
         raise HTTPException(status_code=400, detail="start must be on or before end")
     with track_job("manual_statcast_sync"):
-        result = await sync_statcast(start=start, end=end, season=season)
+        result = await sync_statcast(start=start, end=end, season=season, window_days=window_days)
     record_synced_counts(result)
     return {"status": "ok", "statcast": result}
+
 
 
 @router.post("/weather-sync")

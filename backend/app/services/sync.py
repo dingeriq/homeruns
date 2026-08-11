@@ -234,4 +234,14 @@ async def run_full_sync() -> Dict[str, int]:
     except Exception as exc:
         logger.exception("Probable pitcher backfill failed: %s", exc)
         counts["probable_pitchers"] = 0
+    try:
+        from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
+
+        counts["weather"] = (await sync_weather()).get("weather_stored", 0)
+    except OpenWeatherNotConfigured:
+        logger.info("Weather sync skipped: OPENWEATHER_API_KEY not set")
+        counts["weather"] = 0
+    except Exception as exc:
+        logger.exception("Weather sync failed: %s", exc)
+        counts["weather"] = 0
     return counts

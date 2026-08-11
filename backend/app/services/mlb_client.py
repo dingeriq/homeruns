@@ -67,7 +67,7 @@ class MLBStatsClient:
             params={
                 "sportId": 1,
                 "date": on.isoformat(),
-                "hydrate": "probablePitcher,team,venue",
+                "hydrate": "probablePitcher,team,venue,lineups",
             },
         )
 
@@ -89,3 +89,7 @@ class MLBStatsClient:
 
     async def person(self, person_id: int) -> Dict[str, Any]:
         return await self._get(f"/people/{person_id}")
+
+    async def boxscore(self, game_pk: int) -> Dict[str, Any]:
+        """Live boxscore — carries ``battingOrder`` once a lineup is submitted."""
+        return await self._get(f"/game/{game_pk}/boxscore")

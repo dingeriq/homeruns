@@ -191,3 +191,43 @@ def test_players_invalid_limit_is_validated(client: httpx.Client, limit: str) ->
     body = res.json()
     assert body["error"] == "ValidationError"
     assert isinstance(body["detail"], str)
+
+
+# --- monitoring -------------------------------------------------------------
+
+def test_metrics_prometheus_exposition(client):
+    res = client.get("/metrics")
+    assert res.status_code == 200
+    assert "text/plain" in res.headers["content-type"]
+    body = res.text
+    assert "dingeriq_http_requests_total" in body
+    assert "dingeriq_http_request_duration_seconds" in body
+    # never leak credentials through metrics
+    assert "password" not in body.lower()
+
+
+def test_metrics_summary_structure(client):
+    res = client.get("/metrics/summary")
+    assert res.status_code == 200
+    data = res.json()
+    for key in (
+        "uptime_seconds",
+        "requests_total",
+        "errors_total",
+        "error_rate",
+        "avg_latency_ms",
+        "status_counts",
+        "top_routes",
+        "jobs",
+        "startup",
+    ):
+        assert key in data
+    assert data["requests_total"] >= 1
+    assert isinstance(data["status_counts"], dict)
+
+
+def test_metrics_counts_requests(client):
+    before = client.get("/metrics/summary").json()["requests_total"]
+    client.get("/health")
+    after = client.get("/metrics/summary").json()["requests_total"]
+    assert after > before

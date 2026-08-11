@@ -8,6 +8,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.monitoring import record_synced_counts, track_job
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 
@@ -19,7 +20,9 @@ _scheduler: AsyncIOScheduler | None = None
 async def _job() -> None:
     logger.info("Daily MLB refresh starting")
     try:
-        counts = await run_full_sync()
+        with track_job("mlb_daily_refresh"):
+            counts = await run_full_sync()
+        record_synced_counts(counts)
         logger.info("Daily refresh complete: %s", counts)
     except Exception as exc:
         logger.exception("Daily refresh failed: %s", exc)
@@ -28,7 +31,9 @@ async def _job() -> None:
 async def _statcast_job() -> None:
     logger.info("Daily Statcast ingest starting")
     try:
-        result = await sync_statcast()
+        with track_job("statcast_daily_ingest"):
+            result = await sync_statcast()
+        record_synced_counts(result)
         logger.info("Statcast ingest complete: %s", result)
     except Exception as exc:
         logger.exception("Statcast ingest failed: %s", exc)
@@ -78,7 +83,9 @@ async def initial_sync_in_background() -> None:
     """Kick off a startup sync without blocking app boot."""
     async def _runner() -> None:
         try:
-            counts = await run_full_sync()
+            with track_job("initial_sync"):
+                counts = await run_full_sync()
+            record_synced_counts(counts)
             logger.info("Initial sync complete: %s", counts)
         except Exception as exc:
             logger.exception("Initial sync failed: %s", exc)

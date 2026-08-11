@@ -112,6 +112,7 @@ app.include_router(players.router)
 app.include_router(teams.router)
 app.include_router(predictions.router)
 app.include_router(admin.router)
+app.include_router(metrics.router)
 
 
 async def _bootstrap() -> None:
@@ -133,7 +134,8 @@ async def _bootstrap() -> None:
 
     startup_state.initial_sync = "running"
     try:
-        await initial_sync_in_background()
+        with track_job("initial_sync_schedule"):
+            await initial_sync_in_background()
     except Exception as exc:
         startup_state.initial_sync = "failed"
         startup_state.last_error = f"initial_sync: {exc}"

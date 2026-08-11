@@ -6,6 +6,7 @@ from fastapi.responses import JSONResponse
 
 from app.database.session import check_connection, database_diagnostics
 from app.models.schemas import HealthResponse
+from app.monitoring import record_database_up
 from app.state import startup_state
 
 router = APIRouter(tags=["system"])
@@ -24,6 +25,7 @@ async def health() -> HealthResponse:
 async def ready() -> JSONResponse:
     """Readiness: checks database + startup task progress."""
     db_ok = await check_connection()
+    record_database_up(db_ok)
     payload = {
         "status": "ready" if db_ok else "degraded",
         "database": "up" if db_ok else "down",

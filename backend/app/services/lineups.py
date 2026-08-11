@@ -1,0 +1,382 @@
+"""MLB lineup ingestion: confirmed lineups, batting order and PA opportunity.
+
+Design rules (identical to the rest of DingerIQ):
+
+* Players are joined to the canonical ``players`` table by **MLB person id**,
+  never by name.
+* Confirmed lineups come straight from the MLB Stats API. When MLB has not
+  posted a lineup yet we may derive a *projected* lineup from the team's own
+  recently stored confirmed lineups — that is measured history, not invention.
+  If there is no history, nothing is written and the gap is reported.
+* Expected plate appearances are **empirical**: average PA per batting-order
+  slot measured from our own ingested Statcast at-bats for lineups we already
+  stored. Below the sample threshold the value is ``None``, never guessed.
+"""
+from __future__ import annotations
+
+import logging
+from collections import Counter, defaultdict
+from datetime import date
+from typing import Any, Dict, List, Optional, Tuple
+
+from sqlalchemy import delete, func, select
+
+from app.database import models
+from app.database.session import session_scope
+from app.services.mlb_client import MLBStatsClient
+from app.services.sync import _upsert  # noqa: F401  (kept for parity/imports)
+
+logger = logging.getLogger("dingeriq.lineups")
+
+CONFIRMED = "confirmed"
+PROJECTED = "projected"
+
+# Minimum stored (slot, game) samples before an empirical PA average is exposed.
+MIN_PA_SAMPLES = 25
+# How many recent confirmed lineups back a projection.
+PROJECTION_LOOKBACK_GAMES = 10
+
+
+# ---------------------------------------------------------------------------
+# Expected plate appearances (empirical, from our own data)
+# ---------------------------------------------------------------------------
+
+def expected_pa_by_slot(session) -> Dict[int, Dict[str, Any]]:
+    """Average plate appearances per batting-order slot, measured from stored
+    confirmed lineups joined to Statcast at-bats.
+
+    Returns ``{slot: {"expected_pa": float|None, "samples": int}}`` for 1..9.
+    """
+    L = models.GameLineup
+    P = models.StatcastPitch
+    pa_sub = (
+        select(
+            P.game_id.label("game_id"),
+            P.batter_id.label("batter_id"),
+            func.count(func.distinct(P.at_bat_number)).label("pa"),
+        )
+        .group_by(P.game_id, P.batter_id)
+        .subquery()
+    )
+    rows = session.execute(
+        select(L.batting_order, func.avg(pa_sub.c.pa), func.count(pa_sub.c.pa))
+        .join(
+            pa_sub,
+            (pa_sub.c.game_id == L.game_id) & (pa_sub.c.batter_id == L.player_id),
+        )
+        .where(L.status == CONFIRMED, L.batting_order.isnot(None))
+        .group_by(L.batting_order)
+    ).all()
+    measured = {int(slot): (float(avg), int(n)) for slot, avg, n in rows if slot}
+    out: Dict[int, Dict[str, Any]] = {}
+    for slot in range(1, 10):
+        avg, n = measured.get(slot, (None, 0))
+        out[slot] = {
+            "expected_pa": round(avg, 2) if avg is not None and n >= MIN_PA_SAMPLES else None,
+            "samples": n,
+            "note": None
+            if n >= MIN_PA_SAMPLES
+            else f"insufficient sample ({n} < {MIN_PA_SAMPLES}) — expected PA withheld",
+        }
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Ingestion
+# ---------------------------------------------------------------------------
+
+def _known_player_ids(session, ids: List[int]) -> set[int]:
+    if not ids:
+        return set()
+    return {
+        pid
+        for (pid,) in session.execute(
+            select(models.Player.id).where(models.Player.id.in_(ids))
+        ).all()
+    }
+
+
+def _rows_from_players(
+    game_id: int,
+    game_date: date,
+    side: str,
+    team_id: Optional[int],
+    team_abbr: Optional[str],
+    players: List[Dict[str, Any]],
+    status: str,
+    source: str,
+) -> List[Dict[str, Any]]:
+    rows: List[Dict[str, Any]] = []
+    for idx, person in enumerate(players, start=1):
+        pid = person.get("id")
+        if pid is None:
+            continue
+        rows.append(
+            {
+                "game_id": game_id,
+                "game_date": game_date,
+                "side": side,
+                "team_id": team_id,
+                "team_abbreviation": team_abbr,
+                "player_id": int(pid),
+                "player_name": person.get("fullName"),
+                "batting_order": idx if idx <= 9 else None,
+                "position": (person.get("primaryPosition") or {}).get("abbreviation"),
+                "is_starter": idx <= 9,
+                "status": status,
+                "source": source,
+            }
+        )
+    return rows
+
+
+def _batting_order_from_boxscore(payload: Dict[str, Any], side: str) -> List[Dict[str, Any]]:
+    team = ((payload.get("teams") or {}).get(side)) or {}
+    order = team.get("battingOrder") or []
+    players = team.get("players") or {}
+    out: List[Dict[str, Any]] = []
+    for pid in order[:9]:
+        entry = players.get(f"ID{pid}") or {}
+        person = entry.get("person") or {}
+        out.append(
+            {
+                "id": pid,
+                "fullName": person.get("fullName"),
+                "primaryPosition": entry.get("position") or {},
+            }
+        )
+    return out
+
+
+def _projected_rows(
+    session,
+    game_id: int,
+    game_date: date,
+    side: str,
+    team_id: Optional[int],
+    team_abbr: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Most frequent batting slot per player across the team's recent confirmed lineups."""
+    if not team_abbr:
+        return []
+    L = models.GameLineup
+    recent_games = [
+        g
+        for (g,) in session.execute(
+            select(L.game_id)
+            .where(
+                L.team_abbreviation == team_abbr,
+                L.status == CONFIRMED,
+                L.game_date < game_date,
+            )
+            .distinct()
+            .order_by(L.game_id.desc())
+            .limit(PROJECTION_LOOKBACK_GAMES)
+        ).all()
+    ]
+    if not recent_games:
+        return []
+    rows = session.execute(
+        select(L.player_id, L.player_name, L.batting_order, L.position).where(
+            L.team_abbreviation == team_abbr,
+            L.status == CONFIRMED,
+            L.game_id.in_(recent_games),
+            L.batting_order.isnot(None),
+        )
+    ).all()
+    if not rows:
+        return []
+    slots: Dict[int, Counter] = defaultdict(Counter)
+    names: Dict[int, Tuple[Optional[str], Optional[str]]] = {}
+    appearances: Counter = Counter()
+    for pid, name, order, pos in rows:
+        slots[pid][int(order)] += 1
+        appearances[pid] += 1
+        names[pid] = (name, pos)
+    # Rank candidates by how often they started, then fill slots 1..9.
+    ranked = sorted(
+        slots.items(),
+        key=lambda kv: (-appearances[kv[0]], sum(s * c for s, c in kv[1].items()) / sum(kv[1].values())),
+    )
+    taken: set[int] = set()
+    assigned: List[Tuple[int, int]] = []
+    for pid, counter in ranked:
+        if len(assigned) >= 9:
+            break
+        for slot, _ in counter.most_common():
+            if slot not in taken:
+                taken.add(slot)
+                assigned.append((slot, pid))
+                break
+    out: List[Dict[str, Any]] = []
+    for slot, pid in sorted(assigned):
+        name, pos = names.get(pid, (None, None))
+        out.append(
+            {
+                "game_id": game_id,
+                "game_date": game_date,
+                "side": side,
+                "team_id": team_id,
+                "team_abbreviation": team_abbr,
+                "player_id": pid,
+                "player_name": name,
+                "batting_order": slot,
+                "position": pos,
+                "is_starter": True,
+                "status": PROJECTED,
+                "source": f"projected:last_{len(recent_games)}_confirmed_lineups",
+            }
+        )
+    return out
+
+
+def _store(session, game_id: int, rows: List[Dict[str, Any]], side: str) -> int:
+    """Replace the stored lineup for one side of one game (idempotent)."""
+    session.execute(
+        delete(models.GameLineup).where(
+            models.GameLineup.game_id == game_id, models.GameLineup.side == side
+        )
+    )
+    for row in rows:
+        session.add(models.GameLineup(**row))
+    return len(rows)
+
+
+async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None = None) -> Dict[str, Any]:
+    """Ingest confirmed lineups for a slate, projecting where MLB has none yet."""
+    day = on or date.today()
+    client = client or MLBStatsClient()
+    payload = await client.schedule(day)
+
+    confirmed_sides = 0
+    projected_sides = 0
+    unavailable_sides = 0
+    stored = 0
+    unmatched_players: List[int] = []
+    games_seen = 0
+
+    for date_block in payload.get("dates", []):
+        for g in date_block.get("games", []):
+            games_seen += 1
+            game_id = g["gamePk"]
+            lineups = g.get("lineups") or {}
+            teams = g.get("teams") or {}
+            for side, key in (("home", "homePlayers"), ("away", "awayPlayers")):
+                team = (teams.get(side) or {}).get("team") or {}
+                team_id = team.get("id")
+                team_abbr = team.get("abbreviation") or team.get("teamCode")
+                people = lineups.get(key) or []
+                status = CONFIRMED
+                source = "mlb_stats_api:schedule.lineups"
+                if not people:
+                    try:
+                        box = await client.boxscore(game_id)
+                        people = _batting_order_from_boxscore(box, side)
+                        source = "mlb_stats_api:boxscore.battingOrder"
+                    except Exception as exc:  # boxscore only exists near/after first pitch
+                        logger.debug("Boxscore unavailable for %s: %s", game_id, exc)
+                        people = []
+                with session_scope() as s:
+                    if people:
+                        rows = _rows_from_players(
+                            game_id, day, side, team_id, team_abbr, people, status, source
+                        )
+                        ids = [r["player_id"] for r in rows]
+                        known = _known_player_ids(s, ids)
+                        unmatched_players.extend(sorted(set(ids) - known))
+                        stored += _store(s, game_id, rows, side)
+                        confirmed_sides += 1
+                    else:
+                        rows = _projected_rows(s, game_id, day, side, team_id, team_abbr)
+                        if rows:
+                            stored += _store(s, game_id, rows, side)
+                            projected_sides += 1
+                        else:
+                            unavailable_sides += 1
+
+    result = {
+        "date": day.isoformat(),
+        "games": games_seen,
+        "confirmed_sides": confirmed_sides,
+        "projected_sides": projected_sides,
+        "unavailable_sides": unavailable_sides,
+        "lineup_slots_stored": stored,
+        "players_not_in_canonical_table": sorted(set(unmatched_players)),
+    }
+    logger.info("Lineup sync: %s", result)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Reads
+# ---------------------------------------------------------------------------
+
+def _serialise(row: models.GameLineup, pa: Dict[int, Dict[str, Any]]) -> Dict[str, Any]:
+    slot_info = pa.get(row.batting_order or 0, {"expected_pa": None, "samples": 0, "note": None})
+    return {
+        "game_id": row.game_id,
+        "game_date": row.game_date.isoformat() if row.game_date else None,
+        "side": row.side,
+        "team_id": row.team_id,
+        "team_abbreviation": row.team_abbreviation,
+        "player_id": row.player_id,
+        "player_name": row.player_name,
+        "batting_order": row.batting_order,
+        "position": row.position,
+        "is_starter": row.is_starter,
+        "status": row.status,
+        "source": row.source,
+        "expected_plate_appearances": slot_info["expected_pa"],
+        "expected_pa_samples": slot_info["samples"],
+        "expected_pa_note": slot_info["note"],
+    }
+
+
+def lineups_for_game(game_id: int) -> List[Dict[str, Any]]:
+    with session_scope() as s:
+        pa = expected_pa_by_slot(s)
+        rows = s.execute(
+            select(models.GameLineup)
+            .where(models.GameLineup.game_id == game_id)
+            .order_by(models.GameLineup.side, models.GameLineup.batting_order)
+        ).scalars().all()
+        return [_serialise(r, pa) for r in rows]
+
+
+def lineups_for_date(day: Optional[date] = None) -> List[Dict[str, Any]]:
+    day = day or date.today()
+    with session_scope() as s:
+        pa = expected_pa_by_slot(s)
+        rows = s.execute(
+            select(models.GameLineup)
+            .where(models.GameLineup.game_date == day)
+            .order_by(
+                models.GameLineup.game_id,
+                models.GameLineup.side,
+                models.GameLineup.batting_order,
+            )
+        ).scalars().all()
+        return [_serialise(r, pa) for r in rows]
+
+
+def lineup_slot_for_player(session, player_id: int, game_id: int) -> Optional[Dict[str, Any]]:
+    row = session.execute(
+        select(models.GameLineup).where(
+            models.GameLineup.game_id == game_id,
+            models.GameLineup.player_id == player_id,
+        )
+    ).scalars().first()
+    if row is None:
+        return None
+    return _serialise(row, expected_pa_by_slot(session))
+
+
+__all__ = [
+    "sync_lineups",
+    "lineups_for_game",
+    "lineups_for_date",
+    "lineup_slot_for_player",
+    "expected_pa_by_slot",
+    "CONFIRMED",
+    "PROJECTED",
+]

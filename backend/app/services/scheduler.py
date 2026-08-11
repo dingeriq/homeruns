@@ -13,6 +13,7 @@ from app.state import startup_state
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 from app.services.park_factors import compute_park_factors
+from app.services.lineups import sync_lineups
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 logger = logging.getLogger("dingeriq.scheduler")
@@ -51,6 +52,17 @@ async def _park_factor_job() -> None:
         logger.info("Park factor recompute complete: %s", result)
     except Exception as exc:
         logger.exception("Park factor recompute failed: %s", exc)
+
+
+async def _lineup_job() -> None:
+    logger.info("Lineup refresh starting")
+    try:
+        with track_job("lineup_refresh"):
+            result = await sync_lineups()
+        record_synced_counts({"lineups": result.get("lineup_slots_stored", 0)})
+        logger.info("Lineup refresh complete: %s", result)
+    except Exception as exc:
+        logger.exception("Lineup refresh failed: %s", exc)
 
 
 async def _weather_job() -> None:
@@ -98,6 +110,13 @@ def start_scheduler() -> None:
             minute=(settings.statcast_refresh_minute + 20) % 60,
         ),
         id="daily-park-factors",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        _lineup_job,
+        CronTrigger(minute="5,35"),
+        id="lineup-refresh",
         max_instances=1,
         coalesce=True,
     )

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
+from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
@@ -69,3 +70,14 @@ async def trigger_park_factor_sync() -> dict:
         result = await asyncio.to_thread(compute_park_factors)
     record_synced_counts({"park_factors": result.get("park_factors_stored", 0)})
     return {"status": "ok", "park_factors": result}
+
+
+@router.post("/lineups-sync")
+async def trigger_lineup_sync(
+    on: Optional[date] = Query(None, description="Slate date to ingest (default: today)"),
+) -> dict:
+    """Ingest confirmed lineups (projecting from stored history where absent)."""
+    with track_job("manual_lineup_sync"):
+        result = await sync_lineups(on=on)
+    record_synced_counts({"lineups": result.get("lineup_slots_stored", 0)})
+    return {"status": "ok", "lineups": result}

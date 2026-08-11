@@ -37,6 +37,7 @@ class GameInfo(BaseModel):
     home_team: str
     away_team: str
     venue: Optional[str] = None
+    venue_id: Optional[int] = None
     status: Optional[str] = None
     home_away: Optional[str] = Field(None, description="'home' or 'away' for this hitter")
     opponent_team: Optional[str] = None
@@ -146,6 +147,21 @@ class WeatherFactors(BaseModel):
     source: Optional[str] = None
 
 
+class LineupInfo(BaseModel):
+    """Batting order slot + plate-appearance opportunity for this hitter."""
+
+    status: Optional[str] = Field(None, description="'confirmed' | 'projected' | 'unavailable'")
+    batting_order: Optional[int] = None
+    position: Optional[str] = None
+    is_starter: Optional[bool] = None
+    team_abbreviation: Optional[str] = None
+    expected_plate_appearances: Optional[float] = None
+    expected_pa_samples: Optional[int] = None
+    expected_pa_note: Optional[str] = None
+    source: Optional[str] = None
+    reason: Optional[str] = None
+
+
 class ModelFeatures(BaseModel):
     """Named feature slots the model will consume. Values are null until the
     feature pipeline is materialised."""
@@ -196,6 +212,7 @@ class PredictionDetail(BaseModel):
     recent_performance: Optional[RecentPerformance] = None
     park_factors: Optional[ParkFactors] = None
     weather: Optional[WeatherFactors] = None
+    lineup: Optional[LineupInfo] = None
     model_features: ModelFeatures
     prediction: PredictionResult
     explanation: Explanation

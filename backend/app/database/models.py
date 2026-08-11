@@ -191,3 +191,36 @@ class ParkFactor(Base):
     __table_args__ = (
         Index("ix_park_factor_key", "season", "venue_id", "batter_hand"),
     )
+
+
+class GameLineup(Base):
+    """A hitter's slot in a game's batting order (confirmed or projected).
+
+    Rows are keyed on the MLB person id (``player_id``) so lineup entries join
+    to ``players`` by identity, never by name.
+    """
+
+    __tablename__ = "game_lineups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_id: Mapped[int] = mapped_column(Integer, index=True)
+    game_date: Mapped[date] = mapped_column(Date, index=True)
+    # 'home' | 'away'
+    side: Mapped[str] = mapped_column(String(4), index=True)
+    team_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    team_abbreviation: Mapped[Optional[str]] = mapped_column(String(8), nullable=True, index=True)
+
+    player_id: Mapped[int] = mapped_column(Integer, index=True)  # MLB person id
+    player_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    batting_order: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    position: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    is_starter: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    # 'confirmed' (MLB posted) | 'projected' (derived from stored confirmed history)
+    status: Mapped[str] = mapped_column(String(16), index=True, default="confirmed")
+    source: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    __table_args__ = (
+        Index("ix_lineup_game_side_order", "game_id", "side", "batting_order"),
+        Index("ix_lineup_player_date", "player_id", "game_date"),
+    )

@@ -237,6 +237,13 @@ async def run_full_sync() -> Dict[str, int]:
         logger.exception("Probable pitcher backfill failed: %s", exc)
         counts["probable_pitchers"] = 0
     try:
+        from app.services.lineups import sync_lineups
+
+        counts["lineups"] = (await sync_lineups()).get("lineup_slots_stored", 0)
+    except Exception as exc:
+        logger.exception("Lineup sync failed: %s", exc)
+        counts["lineups"] = 0
+    try:
         from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
         counts["weather"] = (await sync_weather()).get("weather_stored", 0)

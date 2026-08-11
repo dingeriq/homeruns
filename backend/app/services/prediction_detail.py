@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import models
+from app.services.lineups import lineup_slot_for_player
 from app.services.park_factors import park_factors_for_venue
 from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
@@ -25,6 +26,7 @@ from app.models.prediction_detail import (
     Explanation,
     GameInfo,
     HitterMetrics,
+    LineupInfo,
     MatchupInfo,
     ModelFeatures,
     ParkFactors,
@@ -344,6 +346,7 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
             home_team=game_row.home_team,
             away_team=game_row.away_team,
             venue=game_row.venue,
+            venue_id=game_row.venue_id,
             status=game_row.status,
             home_away="home" if is_home else "away",
             opponent_team=game_row.away_team if is_home else game_row.home_team,
@@ -459,7 +462,41 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
             "that has coordinates and a completed weather sync."
         )
 
+    lineup_row = (
+        lineup_slot_for_player(session, player_row.id, game.game_id) if game else None
+    )
+    if lineup_row:
+        lineup = LineupInfo(
+            status=lineup_row.get("status"),
+            batting_order=lineup_row.get("batting_order"),
+            position=lineup_row.get("position"),
+            is_starter=lineup_row.get("is_starter"),
+            team_abbreviation=lineup_row.get("team_abbreviation"),
+            expected_plate_appearances=lineup_row.get("expected_plate_appearances"),
+            expected_pa_samples=lineup_row.get("expected_pa_samples"),
+            expected_pa_note=lineup_row.get("expected_pa_note"),
+            source=lineup_row.get("source"),
+        )
+        available.append("lineup")
+    else:
+        lineup = LineupInfo(
+            status="unavailable",
+            reason=(
+                "No confirmed or projected lineup stored for this game/hitter. "
+                "Run POST /admin/lineups-sync once MLB posts the batting order."
+            ),
+        )
+        unavailable.append("lineup")
+        notes["lineup"] = lineup.reason or ""
+
     feature_values: Dict[str, Optional[float]] = {slot: None for slot in FEATURE_SLOTS}
+    if lineup_row:
+        if lineup_row.get("batting_order") is not None:
+            feature_values["lineup_slot"] = float(lineup_row["batting_order"])
+        if lineup_row.get("expected_plate_appearances") is not None:
+            feature_values["expected_plate_appearances"] = float(
+                lineup_row["expected_plate_appearances"]
+            )
     if park_factors.hr_factor is not None:
         feature_values["park_hr_factor"] = park_factors.hr_factor
     hand_factor = (
@@ -532,6 +569,7 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         recent_performance=recent,
         park_factors=park_factors,
         weather=weather,
+        lineup=lineup,
         model_features=model_features,
         prediction=prediction,
         explanation=explanation,

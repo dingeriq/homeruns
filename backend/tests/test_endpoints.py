@@ -231,3 +231,38 @@ def test_metrics_counts_requests(client):
     client.get("/health")
     after = client.get("/metrics/summary").json()["requests_total"]
     assert after > before
+
+
+def test_metrics_exposes_monitoring_families(client):
+    body = client.get("/metrics").text
+    for family in (
+        "dingeriq_http_requests_total",
+        "dingeriq_http_request_duration_seconds",
+        "dingeriq_database_up",
+        "dingeriq_database_connection_failures_total",
+        "dingeriq_mlb_api_requests_total",
+        "dingeriq_job_runs_total",
+        "dingeriq_sync_last_start_timestamp_seconds",
+        "dingeriq_sync_last_end_timestamp_seconds",
+        "dingeriq_sync_last_entity_count",
+        "dingeriq_job_last_success_timestamp_seconds",
+        "dingeriq_scheduler_up",
+        "dingeriq_initial_sync_status",
+    ):
+        assert family in body, f"missing metric family: {family}"
+
+
+def test_metrics_summary_reports_sync_and_dependencies(client):
+    data = client.get("/metrics/summary").json()
+    assert set(("database", "mlb_api", "sync", "status_classes", "endpoints")) <= set(data)
+    assert "connection_failures" in data["database"]
+    assert "request_failures" in data["mlb_api"]
+    assert "entity_counts" in data["sync"]
+    startup = data["startup"]
+    assert "scheduler_started" in startup and "initial_sync" in startup
+
+
+def test_metrics_endpoints_never_leak_secrets(client):
+    blob = (client.get("/metrics").text + client.get("/metrics/summary").text).lower()
+    for needle in ("postgresql://", "postgres://", "pgpassword", "password=", "api_key", "secret"):
+        assert needle not in blob

@@ -1,16 +1,28 @@
-"""Admin endpoints — trigger data sync manually."""
+"""Admin endpoints — trigger data sync manually and audit data quality."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
 from app.monitoring import record_synced_counts, track_job
+from app.services.data_audit import run_audit
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+
+
+@router.get("/data-audit")
+async def data_audit() -> dict:
+    """Read-only audit: MLB id integrity + exact Statcast coverage."""
+    try:
+        return await asyncio.to_thread(run_audit)
+    except Exception as exc:  # database down / schema missing
+        raise HTTPException(status_code=503, detail=f"audit unavailable: {type(exc).__name__}")
+
 
 
 @router.post("/sync")

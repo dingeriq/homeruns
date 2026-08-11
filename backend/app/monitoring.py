@@ -128,6 +128,47 @@ mlb_api_request_duration_seconds = Histogram(
     registry=REGISTRY,
 )
 
+odds_api_requests_total = Counter(
+    "dingeriq_odds_api_requests_total",
+    "Requests to The Odds API by endpoint and outcome.",
+    ("endpoint", "outcome"),
+    registry=REGISTRY,
+)
+
+odds_api_request_failures_total = Counter(
+    "dingeriq_odds_api_request_failures_total",
+    "Failed Odds API requests by endpoint and error class.",
+    ("endpoint", "error"),
+    registry=REGISTRY,
+)
+
+odds_api_request_duration_seconds = Histogram(
+    "dingeriq_odds_api_request_duration_seconds",
+    "Odds API request latency in seconds.",
+    ("endpoint",),
+    buckets=(0.1, 0.25, 0.5, 1, 2.5, 5, 10, 20),
+    registry=REGISTRY,
+)
+
+odds_last_success_timestamp = Gauge(
+    "dingeriq_odds_last_success_timestamp_seconds",
+    "Unix timestamp of the last successful odds sync.",
+    registry=REGISTRY,
+)
+
+odds_last_import_count = Gauge(
+    "dingeriq_odds_last_import_count",
+    "Entities imported by the most recent odds sync.",
+    ("entity",),
+    registry=REGISTRY,
+)
+
+odds_api_quota_remaining = Gauge(
+    "dingeriq_odds_api_quota_remaining",
+    "Requests remaining on the Odds API plan, as reported by the provider.",
+    registry=REGISTRY,
+)
+
 sync_last_start_timestamp = Gauge(
     "dingeriq_sync_last_start_timestamp_seconds",
     "Unix timestamp when a sync job last started.",
@@ -195,6 +236,8 @@ INITIAL_SYNC_STATES = {"pending": 0, "running": 1, "complete": 2, "failed": 3}
 # --- lightweight in-process snapshot (for /metrics/summary) -----------------
 
 _lock = Lock()
+_odds_failures = 0
+_odds_last: Dict[str, Any] = {}
 _request_count = 0
 _error_count = 0
 _latency_sum = 0.0
@@ -286,6 +329,61 @@ def record_mlb_request(endpoint: str, duration: float, error: Optional[BaseExcep
             _mlb_failures += 1
     except Exception:  # pragma: no cover
         logger.debug("Failed to record MLB API metrics", exc_info=True)
+
+
+def record_odds_request(
+    endpoint: str, duration: float, error: Optional[BaseException] = None
+) -> None:
+    """Record an Odds API call. Only the endpoint template is labelled — never
+    the URL, query string or API key."""
+    global _odds_failures
+    try:
+        odds_api_request_duration_seconds.labels(endpoint=endpoint).observe(duration)
+        if error is None:
+            odds_api_requests_total.labels(endpoint=endpoint, outcome="success").inc()
+            return
+        odds_api_requests_total.labels(endpoint=endpoint, outcome="failure").inc()
+        odds_api_request_failures_total.labels(
+            endpoint=endpoint, error=type(error).__name__
+        ).inc()
+        with _lock:
+            _odds_failures += 1
+    except Exception:  # pragma: no cover
+        logger.debug("Failed to record Odds API metrics", exc_info=True)
+
+
+def record_odds_sync(result: Any, success: bool = True) -> None:
+    """Record the outcome of an odds sync. Only counts and timestamps are kept."""
+    global _odds_last
+    try:
+        counts = {
+            "events": int((result or {}).get("events_retrieved") or 0),
+            "markets": len((result or {}).get("markets") or []),
+            "bookmakers": int((result or {}).get("bookmaker_count") or 0),
+            "outcomes": int((result or {}).get("outcomes_parsed") or 0),
+            "snapshots_stored": int((result or {}).get("snapshots_stored") or 0),
+            "hr_props": int((result or {}).get("hr_prop_outcomes") or 0),
+            "hr_players_matched": int((result or {}).get("hr_players_matched") or 0),
+        }
+        for entity, value in counts.items():
+            odds_last_import_count.labels(entity=entity).set(value)
+        quota = (result or {}).get("quota_remaining")
+        if quota is not None:
+            odds_api_quota_remaining.set(float(quota))
+        now = time.time()
+        if success:
+            odds_last_success_timestamp.set(now)
+        with _lock:
+            _odds_last = {
+                "at": now,
+                "success": bool(success),
+                "counts": counts,
+                "errors": len((result or {}).get("errors") or []),
+                "duration_seconds": (result or {}).get("duration_seconds"),
+                "quota_remaining": quota,
+            }
+    except Exception:  # pragma: no cover
+        logger.debug("Failed to record odds sync metrics", exc_info=True)
 
 
 def record_scheduler_status(running: bool) -> None:
@@ -394,6 +492,8 @@ def summary() -> Dict[str, Any]:
         jobs = {k: dict(v) for k, v in _jobs.items()}
         db_failures = _db_failures
         mlb_failures = _mlb_failures
+        odds_failures = _odds_failures
+        odds_last = dict(_odds_last) if _odds_last else None
         entity_counts = dict(_entity_counts)
         endpoints = {
             key: {
@@ -426,6 +526,11 @@ def summary() -> Dict[str, Any]:
             "connection_failures": db_failures,
         },
         "mlb_api": {"request_failures": mlb_failures},
+        "odds_api": {
+            "request_failures": odds_failures,
+            "last_sync": odds_last,
+            "last_success_at": (odds_last or {}).get("at"),
+        },
         "sync": {
             "last_success_at": last_success or None,
             "entity_counts": entity_counts,

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
+from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
 from app.services.statcast_audit import run_statcast_audit

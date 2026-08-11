@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -10,11 +11,18 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import admin, games, health, players, predictions, teams
+from app.api import admin, games, health, metrics, players, predictions, teams
 from app.config import settings
 from app.database.session import init_db
 from app.logging_config import configure_logging
 from app.models.schemas import ErrorResponse
+from app.monitoring import (
+    http_requests_in_progress,
+    normalize_path,
+    record_exception,
+    record_request,
+    track_job,
+)
 from app.state import startup_state
 from app.services.scheduler import (
     initial_sync_in_background,
@@ -50,10 +58,27 @@ app.add_middleware(
 
 
 @app.middleware("http")
-async def access_log(request: Request, call_next):
-    response = await call_next(request)
-    logger.info("%s %s -> %s", request.method, request.url.path, response.status_code)
-    return response
+async def access_log_and_metrics(request: Request, call_next):
+    started = time.perf_counter()
+    http_requests_in_progress.inc()
+    status = 500
+    try:
+        response = await call_next(request)
+        status = response.status_code
+        return response
+    except Exception:
+        record_exception(request.url.path)
+        raise
+    finally:
+        http_requests_in_progress.dec()
+        duration = time.perf_counter() - started
+        route = request.scope.get("route")
+        path = normalize_path(request.url.path, getattr(route, "path", None))
+        record_request(request.method, path, status, duration)
+        logger.info(
+            "%s %s -> %s (%.1fms)", request.method, request.url.path, status, duration * 1000
+        )
+
 
 
 @app.exception_handler(StarletteHTTPException)
@@ -87,6 +112,7 @@ app.include_router(players.router)
 app.include_router(teams.router)
 app.include_router(predictions.router)
 app.include_router(admin.router)
+app.include_router(metrics.router)
 
 
 async def _bootstrap() -> None:
@@ -108,7 +134,8 @@ async def _bootstrap() -> None:
 
     startup_state.initial_sync = "running"
     try:
-        await initial_sync_in_background()
+        with track_job("initial_sync_schedule"):
+            await initial_sync_in_background()
     except Exception as exc:
         startup_state.initial_sync = "failed"
         startup_state.last_error = f"initial_sync: {exc}"

@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.monitoring import record_synced_counts, track_job
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 
@@ -14,7 +15,9 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 @router.post("/sync")
 async def trigger_sync() -> dict:
-    counts = await run_full_sync()
+    with track_job("manual_full_sync"):
+        counts = await run_full_sync()
+    record_synced_counts(counts)
     return {"status": "ok", "synced": counts}
 
 
@@ -26,5 +29,7 @@ async def trigger_statcast_sync(
 ) -> dict:
     if start and end and start > end:
         raise HTTPException(status_code=400, detail="start must be on or before end")
-    result = await sync_statcast(start=start, end=end, season=season)
+    with track_job("manual_statcast_sync"):
+        result = await sync_statcast(start=start, end=end, season=season)
+    record_synced_counts(result)
     return {"status": "ok", "statcast": result}

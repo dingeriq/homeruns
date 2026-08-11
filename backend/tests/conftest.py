@@ -33,11 +33,14 @@ def client() -> Iterator[httpx.Client]:
             yield c
         return
 
+    from fastapi.testclient import TestClient
+
     from app.main import app  # imported lazily so sys.path is set first
 
-    transport = httpx.ASGITransport(app=app)
-    with httpx.Client(transport=transport, base_url="http://testserver", timeout=30.0) as c:
+    # TestClient runs the ASGI app in-process and works across httpx versions.
+    with TestClient(app, base_url="http://testserver") as c:
         yield c
+
 
 
 @pytest.fixture(scope="session")

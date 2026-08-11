@@ -1,5 +1,8 @@
 # Deploying the DingerIQ backend to Railway
 
+> Deployment trigger note: 2026-08-11 — no functional change; this commit is only to refresh Railway's GitHub integration deployment pointer.
+
+
 ## Deploying from GitHub (the one supported setup)
 
 There is now exactly ONE deployment path — no alternatives, no ambiguity:

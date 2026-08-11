@@ -7,6 +7,7 @@ No feature engineering, no modelling — raw landing only.
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
 import logging
@@ -23,7 +24,7 @@ from tenacity import (
 
 from app.config import settings
 from app.database import models
-from app.database.session import session_scope
+from app.database.session import SessionLocal, session_scope
 from app.services.sync import _upsert
 
 logger = logging.getLogger("dingeriq.statcast")

@@ -8,7 +8,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
-from app.monitoring import record_synced_counts, track_job
+from app.monitoring import record_scheduler_status, record_synced_counts, track_job
+from app.state import startup_state
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
 
@@ -63,6 +64,7 @@ def start_scheduler() -> None:
     )
     sched.start()
     _scheduler = sched
+    record_scheduler_status(True)
     logger.info(
         "Scheduler started (MLB %02d:%02d UTC, Statcast %02d:%02d UTC)",
         settings.daily_refresh_hour,
@@ -77,6 +79,7 @@ def shutdown_scheduler() -> None:
     if _scheduler:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+        record_scheduler_status(False)
 
 
 async def initial_sync_in_background() -> None:
@@ -86,8 +89,11 @@ async def initial_sync_in_background() -> None:
             with track_job("initial_sync"):
                 counts = await run_full_sync()
             record_synced_counts(counts)
+            startup_state.initial_sync = "complete"
             logger.info("Initial sync complete: %s", counts)
         except Exception as exc:
+            startup_state.initial_sync = "failed"
+            startup_state.last_error = f"initial_sync: {type(exc).__name__}"
             logger.exception("Initial sync failed: %s", exc)
 
     asyncio.create_task(_runner())

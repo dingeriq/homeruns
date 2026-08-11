@@ -18,6 +18,8 @@ from app.config import (
     safe_database_target,
 )
 
+from app.monitoring import record_database_up
+
 logger = logging.getLogger("dingeriq.db")
 
 
@@ -115,8 +117,11 @@ async def check_connection() -> bool:
         return True
 
     try:
-        return await asyncio.wait_for(asyncio.to_thread(_ping), timeout=8)
+        ok = await asyncio.wait_for(asyncio.to_thread(_ping), timeout=8)
+        record_database_up(True)
+        return ok
     except Exception as exc:
+        record_database_up(False, operation="ping")
         target = safe_database_target()
         logger.warning(
             "Database ping failed (host=%s port=%s source=%s): %s",

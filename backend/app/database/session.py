@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.config import (
     database_environment_presence,
     database_source,
+    pg_parts_presence,
     resolve_database_url,
     safe_database_target,
 )
@@ -93,12 +94,16 @@ def database_diagnostics() -> dict:
     resolved_url = resolve_database_url()
     source = database_source()
     target = safe_database_target(resolved_url)
+    parts = pg_parts_presence()
     return {
         "database_url_present": source != "local fallback default",
         "database_url_source": source,
+        "database_driver": _normalize_url(resolved_url).split("://", 1)[0],
         "database_host": target["host"],
         "database_port": target["port"],
         "database_name": target["database"],
+        "pg_parts_present": parts,
+        "pg_parts_complete": all(parts[k] for k in ("host", "user", "database")),
         "environment_present": database_environment_presence(),
     }
 

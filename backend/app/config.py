@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
-from urllib.parse import urlsplit
+from typing import List, Optional, Tuple
+from urllib.parse import quote_plus, urlsplit
 
 LOCAL_FALLBACK_DATABASE_URL = "postgresql+psycopg://dingeriq:dingeriq@localhost:5432/dingeriq"
 
@@ -24,6 +24,16 @@ DATABASE_URL_ENV_VARS = (
     "PG_URL",
 )
 
+# Discrete parts, in priority order (first non-empty wins). PGPASSWORD is used
+# but never logged, reported or echoed anywhere.
+PG_PART_ENV_VARS = {
+    "host": ("PGHOST", "POSTGRES_HOST", "PGHOST_PRIVATE", "RAILWAY_PRIVATE_DOMAIN"),
+    "port": ("PGPORT", "POSTGRES_PORT"),
+    "database": ("PGDATABASE", "POSTGRES_DB", "POSTGRES_DATABASE"),
+    "user": ("PGUSER", "POSTGRES_USER"),
+    "password": ("PGPASSWORD", "POSTGRES_PASSWORD"),
+}
+
 SAFE_DATABASE_ENV_VARS = (
     "DATABASE_URL",
     "DATABASE_PRIVATE_URL",
@@ -32,6 +42,7 @@ SAFE_DATABASE_ENV_VARS = (
     "PGPORT",
     "PGDATABASE",
     "PGUSER",
+    "PGPASSWORD",  # presence only — value is never read out
     "TEST_RAILWAY",
 )
 
@@ -49,17 +60,45 @@ def _env(name: str) -> Optional[str]:
     return raw or None
 
 
+def _first_env(names: Tuple[str, ...]) -> Optional[str]:
+    for name in names:
+        value = _env(name)
+        if value:
+            return value
+    return None
+
+
+def _discovered_url_var() -> Optional[str]:
+    """Any *DATABASE_URL / *POSTGRES_URL style var injected under another name."""
+    for name in sorted(os.environ):
+        upper = name.upper()
+        if upper in DATABASE_URL_ENV_VARS:
+            continue
+        if upper.endswith("DATABASE_URL") or upper.endswith("POSTGRES_URL"):
+            value = _env(name)
+            if value and value.startswith(("postgres://", "postgresql://")):
+                return name
+    return None
+
+
+def pg_parts_presence() -> dict[str, bool]:
+    """Which discrete PG* parts are available (booleans only)."""
+    return {key: _first_env(names) is not None for key, names in PG_PART_ENV_VARS.items()}
+
+
 def _database_url_from_parts() -> Optional[str]:
     """Build a URL from discrete PG* vars when no full URL is provided."""
-    host = _env("PGHOST") or _env("POSTGRES_HOST")
-    user = _env("PGUSER") or _env("POSTGRES_USER")
-    password = _env("PGPASSWORD") or _env("POSTGRES_PASSWORD")
-    db = _env("PGDATABASE") or _env("POSTGRES_DB")
-    port = _env("PGPORT") or _env("POSTGRES_PORT") or "5432"
-    if not (host and user and db):
+    host = _first_env(PG_PART_ENV_VARS["host"])
+    user = _first_env(PG_PART_ENV_VARS["user"])
+    password = _first_env(PG_PART_ENV_VARS["password"])
+    database = _first_env(PG_PART_ENV_VARS["database"])
+    port = _first_env(PG_PART_ENV_VARS["port"]) or "5432"
+    if not (host and user and database):
         return None
-    auth = f"{user}:{password}" if password else user
-    return f"postgresql://{auth}@{host}:{port}/{db}"
+    auth = quote_plus(user)
+    if password:
+        auth = f"{auth}:{quote_plus(password)}"
+    return f"postgresql://{auth}@{host}:{port}/{database}"
 
 
 def resolve_database_url() -> str:
@@ -67,6 +106,9 @@ def resolve_database_url() -> str:
         value = _env(name)
         if value:
             return value
+    discovered = _discovered_url_var()
+    if discovered:
+        return _env(discovered)  # type: ignore[return-value]
     built = _database_url_from_parts()
     if built:
         return built
@@ -78,6 +120,9 @@ def database_source() -> str:
     for name in DATABASE_URL_ENV_VARS:
         if _env(name):
             return name
+    discovered = _discovered_url_var()
+    if discovered:
+        return f"discovered env var: {discovered}"
     if _database_url_from_parts():
         return "PG* environment parts"
     return "local fallback default"
@@ -104,6 +149,7 @@ def safe_database_target(url: Optional[str] = None) -> dict:
         }
     except Exception:
         return {"host": "unparseable", "port": None, "database": None}
+
 
 
 @dataclass(frozen=True)

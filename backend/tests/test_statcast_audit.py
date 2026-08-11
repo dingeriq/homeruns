@@ -92,3 +92,30 @@ def test_audit_leaks_no_credentials(require_db, client: httpx.Client) -> None:
     body = client.get("/admin/statcast-audit").text.lower()
     for needle in ("password", "postgresql://", "postgres://", "pgpassword", "api_key"):
         assert needle not in body
+
+
+# --- date-range filtering -------------------------------------------------
+
+
+def test_audit_rejects_inverted_range(client: httpx.Client) -> None:
+    res = client.get("/admin/statcast-audit", params={"start": "2024-06-01", "end": "2024-05-01"})
+    assert res.status_code == 400
+
+
+def test_audit_accepts_date_range(client: httpx.Client, db_up: bool) -> None:
+    if not db_up:
+        pytest.skip("database unreachable — skipping data-dependent test")
+    res = client.get("/admin/statcast-audit", params={"start": "2024-04-01", "end": "2024-04-30"})
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["date_range"] == {"start": "2024-04-01", "end": "2024-04-30", "scope": "range"}
+    if body["status"] == "populated":
+        assert body["totals"]["first_date"] >= "2024-04-01"
+        assert body["totals"]["last_date"] <= "2024-04-30"
+
+
+def test_full_audit_reports_scope_all(client: httpx.Client, db_up: bool) -> None:
+    if not db_up:
+        pytest.skip("database unreachable — skipping data-dependent test")
+    body = client.get("/admin/statcast-audit").json()
+    assert body["date_range"]["scope"] == "all"

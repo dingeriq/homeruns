@@ -104,7 +104,7 @@ WEATHER_KEYS = (
 )
 
 
-def test_weather_today_contract(client: httpx.Client) -> None:
+def test_weather_today_contract(require_db, client: httpx.Client) -> None:
     res = client.get("/weather/today")
     assert res.status_code == 200
     body = res.json()
@@ -132,7 +132,7 @@ def test_invalid_game_id_is_validated(client: httpx.Client, bad: str) -> None:
     assert res.status_code == 422
 
 
-def test_weather_response_leaks_no_api_key(client: httpx.Client) -> None:
+def test_weather_response_leaks_no_api_key(require_db, client: httpx.Client) -> None:
     res = client.get("/weather/today")
     assert "appid" not in res.text.lower()
     assert "e71055" not in res.text

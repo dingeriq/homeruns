@@ -49,14 +49,16 @@ def get_engine() -> Engine:
             target["port"],
             target["database"],
         )
+        normalized = _normalize_url(url)
+        connect_args = {} if normalized.startswith("sqlite") else {"connect_timeout": 5}
         _engine = create_engine(
-            _normalize_url(url),
+            normalized,
             pool_pre_ping=True,
             pool_size=5,
             max_overflow=10,
             pool_timeout=10,
             future=True,
-            connect_args={"connect_timeout": 5},
+            connect_args=connect_args,
         )
         _session_factory = sessionmaker(
             bind=_engine, autoflush=False, autocommit=False, future=True

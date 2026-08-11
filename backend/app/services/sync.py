@@ -6,6 +6,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import models
@@ -81,6 +82,8 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
                     "status": (g.get("status") or {}).get("detailedState", "Scheduled"),
                     "home_probable_pitcher": (home.get("probablePitcher") or {}).get("fullName"),
                     "away_probable_pitcher": (away.get("probablePitcher") or {}).get("fullName"),
+                    "home_probable_pitcher_id": (home.get("probablePitcher") or {}).get("id"),
+                    "away_probable_pitcher_id": (away.get("probablePitcher") or {}).get("id"),
                 }
             )
     with session_scope() as s:
@@ -95,6 +98,7 @@ async def sync_players(client: MLBStatsClient) -> int:
 
     total = 0
     all_rows: List[Dict[str, Any]] = []
+    seen: set[int] = set()
     # Rate-limit ourselves by iterating sequentially with small pauses.
     for team_id, abbr in team_rows:
         try:
@@ -105,15 +109,19 @@ async def sync_players(client: MLBStatsClient) -> int:
         for entry in data.get("roster", []):
             person = entry.get("person", {})
             pos = (entry.get("position") or {}).get("abbreviation")
+            pid = person.get("id")
+            if pid is None or pid in seen:
+                continue
+            seen.add(pid)
             all_rows.append(
                 {
-                    "id": person["id"],
+                    "id": pid,
                     "full_name": person.get("fullName", ""),
                     "team_id": team_id,
                     "team_abbreviation": abbr,
                     "position": pos,
-                    "bats": None,
-                    "throws": None,
+                    "bats": ((person.get("batSide") or {}).get("code") or None),
+                    "throws": ((person.get("pitchHand") or {}).get("code") or None),
                 }
             )
         await asyncio.sleep(0.15)
@@ -122,6 +130,61 @@ async def sync_players(client: MLBStatsClient) -> int:
         total = _upsert(s, models.Player, all_rows, "id")
     logger.info("Synced %d players", total)
     return total
+
+
+async def sync_probable_pitchers(client: MLBStatsClient) -> int:
+    """Ensure every probable starter has a row in ``players`` (identity backfill).
+
+    Probable starters are frequently not on the 26-man active roster snapshot
+    (e.g. just recalled), which would otherwise leave the game with a pitcher
+    name that resolves to no MLB id.
+    """
+    with session_scope() as s:
+        pairs = s.execute(
+            select(
+                models.Game.home_probable_pitcher_id,
+                models.Game.away_probable_pitcher_id,
+            ).where(models.Game.game_date >= date.today())
+        ).all()
+        known = {pid for (pid,) in s.execute(select(models.Player.id)).all()}
+
+    missing = {
+        pid
+        for row in pairs
+        for pid in row
+        if pid is not None and pid not in known
+    }
+    rows: List[Dict[str, Any]] = []
+    for pid in sorted(missing):
+        try:
+            data = await client.person(pid)
+        except Exception as exc:
+            logger.warning("Person fetch failed for %s: %s", pid, exc)
+            continue
+        people = data.get("people") or []
+        if not people:
+            continue
+        person = people[0]
+        team = person.get("currentTeam") or {}
+        rows.append(
+            {
+                "id": person["id"],
+                "full_name": person.get("fullName", ""),
+                "team_id": team.get("id"),
+                "team_abbreviation": (team.get("abbreviation") or None),
+                "position": ((person.get("primaryPosition") or {}).get("abbreviation") or None),
+                "bats": ((person.get("batSide") or {}).get("code") or None),
+                "throws": ((person.get("pitchHand") or {}).get("code") or None),
+            }
+        )
+        await asyncio.sleep(0.1)
+
+    if not rows:
+        return 0
+    with session_scope() as s:
+        n = _upsert(s, models.Player, rows, "id")
+    logger.info("Backfilled %d probable-pitcher identities", n)
+    return n
 
 
 async def run_full_sync() -> Dict[str, int]:
@@ -134,4 +197,9 @@ async def run_full_sync() -> Dict[str, int]:
     except Exception as exc:
         logger.exception("Player sync failed: %s", exc)
         counts["players"] = 0
+    try:
+        counts["probable_pitchers"] = await sync_probable_pitchers(client)
+    except Exception as exc:
+        logger.exception("Probable pitcher backfill failed: %s", exc)
+        counts["probable_pitchers"] = 0
     return counts

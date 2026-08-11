@@ -137,3 +137,23 @@ def init_db() -> None:
     from app.database import models  # noqa: F401  (register models)
 
     Base.metadata.create_all(bind=get_engine())
+    _ensure_columns()
+
+
+# Additive, idempotent column migrations for tables that already exist in
+# deployed environments (create_all never alters an existing table).
+_COLUMN_MIGRATIONS = (
+    ("games", "home_probable_pitcher_id", "INTEGER"),
+    ("games", "away_probable_pitcher_id", "INTEGER"),
+)
+
+
+def _ensure_columns() -> None:
+    try:
+        with get_engine().begin() as conn:
+            for table, column, ddl_type in _COLUMN_MIGRATIONS:
+                conn.execute(
+                    text(f'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS "{column}" {ddl_type}')
+                )
+    except Exception as exc:  # pragma: no cover - never block startup
+        logger.warning("Column migration skipped: %s", exc)

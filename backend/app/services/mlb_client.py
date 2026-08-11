@@ -74,7 +74,11 @@ class MLBStatsClient:
     async def roster(self, team_id: int, season: int | None = None) -> Dict[str, Any]:
         return await self._get(
             f"/teams/{team_id}/roster",
-            params={"rosterType": "active", "season": season or settings.mlb_season},
+            params={
+                "rosterType": "active",
+                "season": season or settings.mlb_season,
+                "hydrate": "person",
+            },
         )
 
     async def person(self, person_id: int) -> Dict[str, Any]:

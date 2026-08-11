@@ -49,6 +49,9 @@ class Game(Base):
     status: Mapped[str] = mapped_column(String(32))
     home_probable_pitcher: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
     away_probable_pitcher: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    # MLB person ids — the reliable join key to players / statcast_pitches.
+    home_probable_pitcher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    away_probable_pitcher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
 
 class StatcastPitch(Base):

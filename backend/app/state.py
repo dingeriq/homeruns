@@ -1,7 +1,23 @@
 """Process-wide startup state (non-blocking readiness reporting)."""
 from __future__ import annotations
 
+import re
 from typing import Any, Dict
+
+_URL_RE = re.compile(r"[a-z0-9+]+://[^\s'\"]+", re.IGNORECASE)
+_SECRETISH_RE = re.compile(
+    r"(password|pwd|api[_-]?key|token|secret)\s*[=:]\s*\S+", re.IGNORECASE
+)
+
+
+def sanitize_error(value: Any) -> str | None:
+    """Strip URLs/DSNs and key=value secrets out of an error string."""
+    if value is None:
+        return None
+    text = str(value)
+    text = _URL_RE.sub("[redacted-url]", text)
+    text = _SECRETISH_RE.sub("[redacted]", text)
+    return text[:300]
 
 
 from app.monitoring import (
@@ -18,7 +34,15 @@ class StartupState:
         self._schema_ready: bool = False
         self._scheduler_started: bool = False
         self._initial_sync: str = "pending"  # pending | running | complete | failed
-        self.last_error: str | None = None
+        self._last_error: str | None = None
+
+    @property
+    def last_error(self) -> str | None:
+        return self._last_error
+
+    @last_error.setter
+    def last_error(self, value: Any) -> None:
+        self._last_error = sanitize_error(value)
 
     @property
     def schema_ready(self) -> bool:
@@ -52,7 +76,7 @@ class StartupState:
             "schema_ready": self.schema_ready,
             "scheduler_started": self.scheduler_started,
             "initial_sync": self.initial_sync,
-            "last_error": self.last_error,
+            "last_error": self._last_error,
         }
 
 

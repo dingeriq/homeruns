@@ -80,7 +80,7 @@ def test_database_connectivity(require_db, ready_payload: dict) -> None:
 # /games/today
 # --------------------------------------------------------------------------
 
-def test_games_today_returns_list(client: httpx.Client) -> None:
+def test_games_today_returns_list(require_db, client: httpx.Client) -> None:
     res = client.get("/games/today")
     assert res.status_code == 200
     assert isinstance(res.json(), list)
@@ -105,7 +105,7 @@ def test_games_today_structure(require_db, client: httpx.Client) -> None:
 # /teams
 # --------------------------------------------------------------------------
 
-def test_teams_returns_list(client: httpx.Client) -> None:
+def test_teams_returns_list(require_db, client: httpx.Client) -> None:
     res = client.get("/teams")
     assert res.status_code == 200
     assert isinstance(res.json(), list)
@@ -129,7 +129,7 @@ def test_teams_structure_and_mlb_data(require_db, client: httpx.Client) -> None:
 # /players
 # --------------------------------------------------------------------------
 
-def test_players_returns_list(client: httpx.Client) -> None:
+def test_players_returns_list(require_db, client: httpx.Client) -> None:
     res = client.get("/players")
     assert res.status_code == 200
     assert isinstance(res.json(), list)

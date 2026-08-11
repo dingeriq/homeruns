@@ -171,7 +171,7 @@ class Settings:
         default_factory=lambda: int(os.getenv("STATCAST_LOOKBACK_DAYS", "2"))
     )
     # Pause between Baseball Savant windows during a long backfill. Keeps
-    # request rate and database write pressure低 enough for small instances.
+    # request rate and database write pressure low enough for small instances.
     statcast_window_pause_seconds: float = field(
         default_factory=lambda: float(os.getenv("STATCAST_WINDOW_PAUSE_SECONDS", "1.5"))
     )

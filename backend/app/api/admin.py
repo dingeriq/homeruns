@@ -30,6 +30,18 @@ async def data_audit() -> dict:
         raise HTTPException(status_code=503, detail=f"audit unavailable: {type(exc).__name__}")
 
 
+@router.get("/db-usage")
+async def db_usage() -> dict:
+    """Read-only PostgreSQL resource usage: size, indexes, connections, load."""
+    try:
+        return await asyncio.to_thread(run_db_usage)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"db usage unavailable: {type(exc).__name__}"
+        )
+
+
+
 
 @router.get("/statcast-audit")
 async def statcast_audit() -> dict:

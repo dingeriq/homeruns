@@ -12,6 +12,7 @@ from app.monitoring import record_scheduler_status, record_synced_counts, track_
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
+from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 logger = logging.getLogger("dingeriq.scheduler")
 
@@ -40,6 +41,22 @@ async def _statcast_job() -> None:
         logger.exception("Statcast ingest failed: %s", exc)
 
 
+async def _weather_job() -> None:
+    if not settings.openweather_is_configured:
+        logger.info("Weather refresh skipped: OPENWEATHER_API_KEY not set")
+        return
+    logger.info("Weather refresh starting")
+    try:
+        with track_job("weather_refresh"):
+            result = await sync_weather()
+        record_synced_counts({"weather": result.get("weather_stored", 0)})
+        logger.info("Weather refresh complete: %s", result)
+    except OpenWeatherNotConfigured as exc:
+        logger.warning("Weather refresh skipped: %s", exc)
+    except Exception as exc:
+        logger.exception("Weather refresh failed: %s", exc)
+
+
 def start_scheduler() -> None:
     global _scheduler
     if _scheduler:
@@ -59,6 +76,13 @@ def start_scheduler() -> None:
             minute=settings.statcast_refresh_minute,
         ),
         id="daily-statcast-ingest",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        _weather_job,
+        CronTrigger(hour=f"*/{max(1, settings.weather_refresh_hours)}", minute=10),
+        id="weather-refresh",
         max_instances=1,
         coalesce=True,
     )

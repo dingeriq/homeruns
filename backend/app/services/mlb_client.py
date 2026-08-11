@@ -81,5 +81,11 @@ class MLBStatsClient:
             },
         )
 
+    async def venues(self) -> Dict[str, Any]:
+        return await self._get(
+            "/venues",
+            params={"sportId": 1, "hydrate": "location,fieldInfo,timezone"},
+        )
+
     async def person(self, person_id: int) -> Dict[str, Any]:
         return await self._get(f"/people/{person_id}")

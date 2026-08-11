@@ -11,6 +11,7 @@ from app.monitoring import record_synced_counts, track_job
 from app.services.data_audit import run_audit
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
+from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -45,3 +46,16 @@ async def trigger_statcast_sync(
         result = await sync_statcast(start=start, end=end, season=season)
     record_synced_counts(result)
     return {"status": "ok", "statcast": result}
+
+
+@router.post("/weather-sync")
+async def trigger_weather_sync(
+    on: Optional[date] = Query(None, description="Game date to refresh (default: today)"),
+) -> dict:
+    try:
+        with track_job("manual_weather_sync"):
+            result = await sync_weather(on=on)
+    except OpenWeatherNotConfigured as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    record_synced_counts({"weather": result.get("weather_stored", 0)})
+    return {"status": "ok", "weather": result}

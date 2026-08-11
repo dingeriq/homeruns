@@ -98,7 +98,7 @@ def test_unavailable_sections_are_reported(require_db, detail: dict) -> None:
     assert isinstance(availability["unavailable"], list)
     assert set(availability["available"]).isdisjoint(availability["unavailable"])
     # park factors, weather, prediction and explanation have no data source yet
-    for section in ("park_factors", "weather", "prediction", "explanation"):
+    for section in ("park_factors", "prediction", "explanation"):
         assert section in availability["unavailable"]
         assert section in availability["notes"]
 
@@ -109,7 +109,12 @@ def test_park_and_weather_values_are_null(require_db, detail: dict) -> None:
     assert park["hr_factor_lhb"] is None
     assert park["hr_factor_rhb"] is None
     weather = detail["weather"]
-    assert all(weather[k] is None for k in ("temperature_f", "wind_speed_mph", "conditions"))
+    availability = detail["data_availability"]
+    if "weather" in availability["unavailable"]:
+        assert all(weather[k] is None for k in ("temperature_f", "wind_speed_mph", "conditions"))
+    else:
+        # Populated weather must come from OpenWeather, never be invented.
+        assert isinstance(weather["source"], str) and weather["source"].startswith("openweather")
 
 
 def test_statcast_sections_are_null_or_numeric(require_db, detail: dict) -> None:

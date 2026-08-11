@@ -52,6 +52,7 @@ class Game(Base):
     # MLB person ids — the reliable join key to players / statcast_pitches.
     home_probable_pitcher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
     away_probable_pitcher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    venue_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
 
 
 class StatcastPitch(Base):
@@ -109,3 +110,56 @@ class StatcastPitch(Base):
         Index("ix_statcast_batter_date", "batter_id", "game_date"),
         Index("ix_statcast_pitcher_date", "pitcher_id", "game_date"),
     )
+
+
+class Venue(Base):
+    """MLB venue with the coordinates weather lookups are keyed on."""
+
+    __tablename__ = "venues"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)  # MLB venue id
+    name: Mapped[str] = mapped_column(String(128), index=True)
+    city: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    state: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    country: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    latitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    longitude: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    timezone: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    roof_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    # Bearing (deg) from home plate to centre field — lets wind direction be
+    # resolved into an out-to-centre component.
+    azimuth_angle: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    elevation_ft: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+
+class GameWeather(Base):
+    """OpenWeather observation/forecast resolved for a game's first pitch."""
+
+    __tablename__ = "game_weather"
+
+    game_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    venue_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    venue_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    game_datetime: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    forecast_time: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    forecast_offset_minutes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    is_forecast: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    temperature_f: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    feels_like_f: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    humidity_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pressure_hpa: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_speed_mph: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_gust_mph: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_deg: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    wind_direction: Mapped[Optional[str]] = mapped_column(String(4), nullable=True)
+    # Positive = blowing out to centre field, negative = blowing in.
+    wind_out_mph: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    cloud_pct: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    precipitation_prob: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    conditions: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    description: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
+    roof_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+
+    source: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

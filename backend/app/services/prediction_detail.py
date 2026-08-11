@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import models
+from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
     DataAvailability,
     Explanation,
@@ -413,11 +414,30 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         "(handedness-split HR factors)."
     )
 
-    weather = WeatherFactors()
-    unavailable.append("weather")
-    notes["weather"] = "No weather ingestion exists. Needs a forecast provider keyed by venue and first pitch."
+    weather_row = weather_for_game(game.game_id) if game else None
+    if weather_row:
+        weather = WeatherFactors(
+            temperature_f=weather_row.get("temperature_f"),
+            wind_speed_mph=weather_row.get("wind_speed_mph"),
+            wind_direction=weather_row.get("wind_direction"),
+            humidity_pct=weather_row.get("humidity_pct"),
+            conditions=weather_row.get("conditions"),
+            roof_status=weather_row.get("roof_status"),
+            source=weather_row.get("source"),
+        )
+        available.append("weather")
+    else:
+        weather = WeatherFactors()
+        unavailable.append("weather")
+        notes["weather"] = (
+            "No OpenWeather record stored for this game. Requires a game with a venue "
+            "that has coordinates and a completed weather sync."
+        )
 
     feature_values: Dict[str, Optional[float]] = {slot: None for slot in FEATURE_SLOTS}
+    if weather_row:
+        feature_values["weather_temperature_f"] = weather_row.get("temperature_f")
+        feature_values["weather_wind_out_component"] = weather_row.get("wind_out_mph")
     if hitter_metrics:
         feature_values["batter_barrel_rate"] = hitter_metrics.barrel_rate
         feature_values["batter_hard_hit_rate"] = hitter_metrics.hard_hit_rate

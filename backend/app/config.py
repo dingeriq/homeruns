@@ -180,6 +180,15 @@ class Settings:
     daily_refresh_minute: int = field(
         default_factory=lambda: int(os.getenv("DAILY_REFRESH_MINUTE", "0"))
     )
+    openweather_api_key: Optional[str] = field(
+        default_factory=lambda: _env("OPENWEATHER_API_KEY")
+    )
+    openweather_api_base: str = field(
+        default_factory=lambda: os.getenv("OPENWEATHER_API_BASE", "https://api.openweathermap.org")
+    )
+    weather_refresh_hours: int = field(
+        default_factory=lambda: int(os.getenv("WEATHER_REFRESH_HOURS", "3"))
+    )
     cors_origins: List[str] = field(
         default_factory=lambda: _split_csv(
             os.getenv(
@@ -188,6 +197,10 @@ class Settings:
             )
         )
     )
+
+    @property
+    def openweather_is_configured(self) -> bool:
+        return bool(self.openweather_api_key)
 
     @property
     def database_url_is_configured(self) -> bool:

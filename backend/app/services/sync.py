@@ -6,6 +6,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Any, Dict, Iterable, List
 
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.database import models

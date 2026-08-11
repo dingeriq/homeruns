@@ -273,19 +273,73 @@ def audit_statcast(session) -> Dict[str, Any]:
     }
 
 
+def audit_lineups(session) -> Dict[str, Any]:
+    """Coverage of stored batting orders and how well they join to players."""
+    try:
+        totals = _one(
+            session,
+            """
+            SELECT count(*) AS slots,
+                   count(*) FILTER (WHERE status = 'confirmed') AS confirmed_slots,
+                   count(*) FILTER (WHERE status = 'projected') AS projected_slots,
+                   count(*) FILTER (WHERE batting_order IS NULL) AS missing_batting_order,
+                   count(DISTINCT game_id) AS games,
+                   count(DISTINCT player_id) AS players,
+                   min(game_date) AS first_date,
+                   max(game_date) AS last_date
+            FROM game_lineups
+            """,
+        )
+        unmatched = _one(
+            session,
+            """
+            SELECT count(*) AS n
+            FROM game_lineups l
+            LEFT JOIN players p ON p.id = l.player_id
+            WHERE p.id IS NULL
+            """,
+        )
+        today = _one(
+            session,
+            """
+            SELECT count(DISTINCT game_id) AS games_with_lineups,
+                   count(*) AS slots
+            FROM game_lineups WHERE game_date = :d
+            """,
+            d=date.today(),
+        )
+    except Exception as exc:
+        return {"status": "unavailable", "reason": f"{type(exc).__name__}"}
+    slots = totals.get("slots") or 0
+    from app.services.lineups import expected_pa_by_slot
+
+    return {
+        "status": "ok" if slots else "empty",
+        **{k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in totals.items()},
+        "players_not_in_canonical_table": unmatched.get("n", 0),
+        "id_join_rate": _pct(slots - (unmatched.get("n") or 0), slots),
+        "today": {k: (v.isoformat() if hasattr(v, "isoformat") else v) for k, v in today.items()},
+        "expected_pa_by_slot": expected_pa_by_slot(session),
+    }
+
+
 def run_audit() -> Dict[str, Any]:
     with session_scope() as s:
         identity = audit_identity(s)
         statcast = audit_statcast(s)
+        lineups = audit_lineups(s)
     return {
         "generated_at": date.today().isoformat(),
         "identity": identity,
         "statcast": statcast,
+        "lineups": lineups,
         "summary": {
             "identity_ok": identity["identity_ok"],
             "statcast_pitches": statcast.get("pitches", 0),
             "statcast_status": statcast.get("status"),
             "statcast_first_date": statcast.get("first_date"),
             "statcast_last_date": statcast.get("last_date"),
+            "lineup_slots": lineups.get("slots", 0),
+            "lineup_status": lineups.get("status"),
         },
     }

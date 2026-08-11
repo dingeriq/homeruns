@@ -62,10 +62,11 @@ def test_ready_response_structure(ready_payload: dict) -> None:
 
 def test_ready_never_leaks_credentials(ready_payload: dict) -> None:
     blob = str(ready_payload).lower()
-    assert "password" not in blob
+    assert "://" not in blob, "a full connection URL must never be exposed"
     assert "@" not in ready_payload.get("database_host", "")
     # presence diagnostics must be booleans, never values
     assert all(isinstance(v, bool) for v in ready_payload["environment_present"].values())
+    assert all(isinstance(v, bool) for v in ready_payload["pg_parts_present"].values())
 
 
 def test_database_connectivity(require_db, ready_payload: dict) -> None:

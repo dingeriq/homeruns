@@ -350,7 +350,10 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         opposing_name = (
             game_row.away_probable_pitcher if is_home else game_row.home_probable_pitcher
         )
-        pitcher = _resolve_pitcher(session, opposing_name)
+        opposing_id = (
+            game_row.away_probable_pitcher_id if is_home else game_row.home_probable_pitcher_id
+        )
+        pitcher = _resolve_pitcher(session, opposing_name, opposing_id)
         if pitcher is not None:
             available.append("pitcher")
         else:

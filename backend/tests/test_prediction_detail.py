@@ -23,7 +23,9 @@ SECTIONS = (
 
 
 @pytest.fixture(scope="module")
-def sample_player_id(client: httpx.Client) -> int:
+def sample_player_id(client: httpx.Client, db_up: bool) -> int:
+    if not db_up:
+        pytest.skip("database unreachable — skipping data-dependent test")
     res = client.get("/players", params={"limit": 1})
     if res.status_code != 200 or not res.json():
         pytest.skip("no players available")
@@ -121,7 +123,7 @@ def test_statcast_sections_are_null_or_numeric(require_db, detail: dict) -> None
         assert sum(p["count"] for p in mix["pitches"]) == mix["total_pitches"]
 
 
-def test_unknown_player_returns_404(client: httpx.Client) -> None:
+def test_unknown_player_returns_404(require_db, client: httpx.Client) -> None:
     res = client.get("/predictions/999999999")
     assert res.status_code == 404
     body = res.json()

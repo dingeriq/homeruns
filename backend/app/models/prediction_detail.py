@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class DataAvailability(BaseModel):
@@ -151,6 +151,8 @@ class ModelFeatures(BaseModel):
 
 
 class PredictionResult(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     hr_probability: Optional[float] = None
     confidence: Optional[float] = None
     model_version: Optional[str] = None
@@ -175,6 +177,8 @@ class Explanation(BaseModel):
 
 
 class PredictionDetail(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     player: PlayerInfo
     game: Optional[GameInfo] = None
     pitcher: Optional[PitcherInfo] = None

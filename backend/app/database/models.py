@@ -163,3 +163,31 @@ class GameWeather(Base):
 
     source: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
     fetched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class ParkFactor(Base):
+    """Venue HR factor for a season, overall and split by batter handedness."""
+
+    __tablename__ = "park_factors"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    venue_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    venue_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    season: Mapped[int] = mapped_column(Integer, index=True)
+    # 'ALL' | 'L' | 'R' | 'U' (unknown batter hand)
+    batter_hand: Mapped[str] = mapped_column(String(4), index=True)
+
+    batted_balls: Mapped[int] = mapped_column(Integer, default=0)
+    home_runs: Mapped[int] = mapped_column(Integer, default=0)
+    hr_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    league_hr_rate: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Null when the sample is below threshold — never estimated.
+    hr_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    sample_note: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+
+    source: Mapped[Optional[str]] = mapped_column(String(48), nullable=True, index=True)
+    computed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_park_factor_key", "season", "venue_id", "batter_hand"),
+    )

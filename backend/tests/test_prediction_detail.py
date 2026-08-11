@@ -97,17 +97,23 @@ def test_unavailable_sections_are_reported(require_db, detail: dict) -> None:
     assert isinstance(availability["available"], list)
     assert isinstance(availability["unavailable"], list)
     assert set(availability["available"]).isdisjoint(availability["unavailable"])
-    # park factors, weather, prediction and explanation have no data source yet
-    for section in ("park_factors", "prediction", "explanation"):
+    # prediction and explanation have no model artifact yet
+    for section in ("prediction", "explanation"):
         assert section in availability["unavailable"]
         assert section in availability["notes"]
 
 
 def test_park_and_weather_values_are_null(require_db, detail: dict) -> None:
     park = detail["park_factors"]
-    assert park["hr_factor"] is None
-    assert park["hr_factor_lhb"] is None
-    assert park["hr_factor_rhb"] is None
+    availability_sections = detail["data_availability"]["unavailable"]
+    if "park_factors" in availability_sections:
+        assert park["hr_factor"] is None
+        assert park["hr_factor_lhb"] is None
+        assert park["hr_factor_rhb"] is None
+    else:
+        # Computed from our own Statcast batted balls — never a hardcoded constant.
+        assert isinstance(park["source"], str) and park["source"]
+        assert park["batted_balls"] and park["batted_balls"] > 0
     weather = detail["weather"]
     availability = detail["data_availability"]
     if "weather" in availability["unavailable"]:

@@ -127,6 +127,12 @@ class ParkFactors(BaseModel):
     hr_factor: Optional[float] = None
     hr_factor_lhb: Optional[float] = None
     hr_factor_rhb: Optional[float] = None
+    season: Optional[int] = None
+    batted_balls: Optional[int] = None
+    home_runs: Optional[int] = None
+    hr_rate: Optional[float] = None
+    league_hr_rate: Optional[float] = None
+    sample_note: Optional[str] = None
     source: Optional[str] = None
 
 

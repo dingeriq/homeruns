@@ -18,6 +18,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import models
+from app.services.park_factors import park_factors_for_venue
 from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
     DataAvailability,
@@ -406,13 +407,37 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         unavailable.append("matchup")
         notes["matchup"] = "Requires a resolved opposing starter."
 
-    # --- Not yet ingested anywhere -----------------------------------------
-    park_factors = ParkFactors(venue=game.venue if game else None, source=None)
-    unavailable.append("park_factors")
-    notes["park_factors"] = (
-        "No park-factor table exists. Needs a stadium/park-factor ingestion job "
-        "(handedness-split HR factors)."
+    park_row = (
+        park_factors_for_venue(session, venue_id=game.venue_id, venue_name=game.venue)
+        if game
+        else None
     )
+    if park_row and any(
+        park_row.get(k) is not None for k in ("hr_factor", "hr_factor_lhb", "hr_factor_rhb")
+    ):
+        park_factors = ParkFactors(
+            venue=park_row.get("venue") or (game.venue if game else None),
+            hr_factor=park_row.get("hr_factor"),
+            hr_factor_lhb=park_row.get("hr_factor_lhb"),
+            hr_factor_rhb=park_row.get("hr_factor_rhb"),
+            season=park_row.get("season"),
+            batted_balls=park_row.get("batted_balls"),
+            home_runs=park_row.get("home_runs"),
+            hr_rate=park_row.get("hr_rate"),
+            league_hr_rate=park_row.get("league_hr_rate"),
+            sample_note=park_row.get("sample_note"),
+            source=park_row.get("source"),
+        )
+        available.append("park_factors")
+    else:
+        park_factors = ParkFactors(venue=game.venue if game else None, source=None)
+        unavailable.append("park_factors")
+        notes["park_factors"] = (
+            park_row.get("sample_note")
+            if park_row and park_row.get("sample_note")
+            else "No park factor computed for this venue yet. Run POST /admin/park-factors-sync "
+            "once enough Statcast batted balls are ingested."
+        )
 
     weather_row = weather_for_game(game.game_id) if game else None
     if weather_row:
@@ -435,6 +460,17 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
         )
 
     feature_values: Dict[str, Optional[float]] = {slot: None for slot in FEATURE_SLOTS}
+    if park_factors.hr_factor is not None:
+        feature_values["park_hr_factor"] = park_factors.hr_factor
+    hand_factor = (
+        park_factors.hr_factor_lhb
+        if player_row.bats == "L"
+        else park_factors.hr_factor_rhb
+        if player_row.bats == "R"
+        else None
+    )
+    if hand_factor is not None:
+        feature_values["park_hr_factor_handedness"] = hand_factor
     if weather_row:
         feature_values["weather_temperature_f"] = weather_row.get("temperature_f")
         feature_values["weather_wind_out_component"] = weather_row.get("wind_out_mph")

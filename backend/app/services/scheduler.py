@@ -12,6 +12,7 @@ from app.monitoring import record_scheduler_status, record_synced_counts, track_
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
+from app.services.park_factors import compute_park_factors
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
 logger = logging.getLogger("dingeriq.scheduler")
@@ -39,6 +40,17 @@ async def _statcast_job() -> None:
         logger.info("Statcast ingest complete: %s", result)
     except Exception as exc:
         logger.exception("Statcast ingest failed: %s", exc)
+
+
+async def _park_factor_job() -> None:
+    logger.info("Park factor recompute starting")
+    try:
+        with track_job("park_factor_recompute"):
+            result = await asyncio.to_thread(compute_park_factors)
+        record_synced_counts({"park_factors": result.get("park_factors_stored", 0)})
+        logger.info("Park factor recompute complete: %s", result)
+    except Exception as exc:
+        logger.exception("Park factor recompute failed: %s", exc)
 
 
 async def _weather_job() -> None:
@@ -76,6 +88,16 @@ def start_scheduler() -> None:
             minute=settings.statcast_refresh_minute,
         ),
         id="daily-statcast-ingest",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        _park_factor_job,
+        CronTrigger(
+            hour=settings.statcast_refresh_hour,
+            minute=(settings.statcast_refresh_minute + 20) % 60,
+        ),
+        id="daily-park-factors",
         max_instances=1,
         coalesce=True,
     )

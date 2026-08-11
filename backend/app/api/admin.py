@@ -12,6 +12,7 @@ from app.services.data_audit import run_audit
 from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
+from app.services.player_backfill import backfill_players
 from app.services.statcast_audit import run_statcast_audit
 from app.services.statcast_service import sync_statcast
 from app.services.sync import run_full_sync
@@ -146,3 +147,27 @@ async def trigger_odds_sync(
         raise HTTPException(status_code=503, detail=str(exc))
     record_synced_counts({"odds": result.get("snapshots_stored", 0)})
     return {"status": "ok", "odds": result}
+
+
+@router.post("/players-backfill")
+async def trigger_player_backfill(
+    limit: Optional[int] = Query(
+        None, ge=1, description="Cap the number of missing ids processed this run"
+    ),
+    batch_size: int = Query(50, ge=1, le=100, description="MLB /people ids per request"),
+) -> dict:
+    """Resolve Statcast person ids missing from ``players`` via the MLB Stats API.
+
+    Read-then-upsert only: canonical ids are never changed, no name matching,
+    and an existing non-null field is never overwritten with NULL.
+    """
+    with track_job("manual_player_backfill"):
+        result = await backfill_players(limit=limit, batch_size=batch_size)
+    record_synced_counts(
+        {
+            "players_backfilled": result.get("players_inserted", 0),
+            "players_identity_updated": result.get("players_updated", 0),
+            "players_unresolved": result.get("unresolved_ids", 0),
+        }
+    )
+    return {"status": "ok", "player_backfill": result}

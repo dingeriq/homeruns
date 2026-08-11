@@ -180,12 +180,28 @@ def _chunked(rows: List[Dict[str, Any]], size: int) -> Iterable[List[Dict[str, A
         yield rows[i : i + size]
 
 
-def store_pitches(rows: List[Dict[str, Any]]) -> int:
+def store_pitches_with_session(session, rows: List[Dict[str, Any]]) -> int:
+    """Upsert rows in 500-row batches on an existing session.
+
+    One commit per batch keeps transactions short (no long-lived write lock)
+    while reusing a single pooled connection for the whole sync. Every batch is
+    an idempotent ON CONFLICT (pitch_uid) upsert, so a retry never duplicates.
+    """
     total = 0
     for chunk in _chunked(rows, _CHUNK):
-        with session_scope() as s:
-            total += _upsert(s, models.StatcastPitch, chunk, "pitch_uid")
+        try:
+            total += _upsert(session, models.StatcastPitch, chunk, "pitch_uid")
+            session.commit()
+        except Exception:
+            session.rollback()
+            raise
     return total
+
+
+def store_pitches(rows: List[Dict[str, Any]]) -> int:
+    """Standalone entry point (own session) — kept for callers/tests."""
+    with session_scope() as s:
+        return store_pitches_with_session(s, rows)
 
 
 async def sync_statcast(
@@ -193,6 +209,7 @@ async def sync_statcast(
     end: date | None = None,
     season: int | None = None,
     window_days: int | None = None,
+    pause_seconds: float | None = None,
 ) -> Dict[str, Any]:
     """Ingest raw Statcast pitches for a date range (default: yesterday+today).
 
@@ -201,11 +218,17 @@ async def sync_statcast(
     resumable (re-running any range is an idempotent upsert on ``pitch_uid``)
     and never holds a season-sized CSV in memory. A failing window is recorded
     and skipped — no rows are fabricated or imputed.
+
+    A single SQLAlchemy session (one pooled connection) is reused for the whole
+    multi-window run, with a commit after every 500-row batch, and a short
+    configurable pause between windows to limit request/database pressure.
     """
     end = end or date.today()
     start = start or (end - timedelta(days=settings.statcast_lookback_days))
     season = season or settings.mlb_season
     step = max(1, window_days or _WINDOW_DAYS)
+    pause = settings.statcast_window_pause_seconds if pause_seconds is None else pause_seconds
+    pause = max(0.0, float(pause))
 
     client = SavantClient()
     total_parsed = 0
@@ -221,54 +244,72 @@ async def sync_statcast(
         pending.append((cursor, w_end))
         cursor = w_end + timedelta(days=1)
 
-    while pending:
-        w_start, w_end = pending.pop(0)
-        try:
-            csv_text = await client.search_csv(w_start, w_end, season)
-            rows = parse_rows(csv_text)
-        except Exception as exc:  # network, Savant 5xx, parse failure
-            logger.exception("Statcast window %s..%s failed", w_start, w_end)
-            errors.append(
+    session = SessionLocal()
+    try:
+        first_window = True
+        while pending:
+            w_start, w_end = pending.pop(0)
+            if not first_window and pause:
+                await asyncio.sleep(pause)
+            first_window = False
+            try:
+                csv_text = await client.search_csv(w_start, w_end, season)
+                rows = parse_rows(csv_text)
+            except Exception as exc:  # network, Savant 5xx, parse failure
+                logger.exception("Statcast window %s..%s failed", w_start, w_end)
+                errors.append(
+                    {
+                        "start": w_start.isoformat(),
+                        "end": w_end.isoformat(),
+                        "error": type(exc).__name__,
+                    }
+                )
+                continue
+
+            # Savant silently truncates at the export cap — split and refetch
+            # rather than storing a partial window.
+            if len(rows) >= _SAVANT_ROW_CAP and w_start < w_end:
+                mid = w_start + timedelta(days=(w_end - w_start).days // 2)
+                logger.warning(
+                    "Statcast window %s..%s hit the %d-row export cap; splitting",
+                    w_start,
+                    w_end,
+                    _SAVANT_ROW_CAP,
+                )
+                pending.insert(0, (mid + timedelta(days=1), w_end))
+                pending.insert(0, (w_start, mid))
+                continue
+            if len(rows) >= _SAVANT_ROW_CAP:
+                truncated.append({"start": w_start.isoformat(), "end": w_end.isoformat()})
+
+            try:
+                stored = await asyncio.to_thread(store_pitches_with_session, session, rows)
+            except Exception as exc:  # database error — window stays retryable
+                logger.exception("Statcast window %s..%s failed to store", w_start, w_end)
+                errors.append(
+                    {
+                        "start": w_start.isoformat(),
+                        "end": w_end.isoformat(),
+                        "error": type(exc).__name__,
+                    }
+                )
+                continue
+
+            total_parsed += len(rows)
+            total_stored += stored
+            windows.append(
                 {
                     "start": w_start.isoformat(),
                     "end": w_end.isoformat(),
-                    "error": type(exc).__name__,
+                    "rows_parsed": len(rows),
+                    "rows_stored": stored,
                 }
             )
-            continue
-
-        # Savant silently truncates at the export cap — split and refetch
-        # rather than storing a partial window.
-        if len(rows) >= _SAVANT_ROW_CAP and w_start < w_end:
-            mid = w_start + timedelta(days=(w_end - w_start).days // 2)
-            logger.warning(
-                "Statcast window %s..%s hit the %d-row export cap; splitting",
-                w_start,
-                w_end,
-                _SAVANT_ROW_CAP,
+            logger.info(
+                "Statcast window %s..%s: parsed %d, stored %d", w_start, w_end, len(rows), stored
             )
-            pending.insert(0, (mid + timedelta(days=1), w_end))
-            pending.insert(0, (w_start, mid))
-            continue
-        if len(rows) >= _SAVANT_ROW_CAP:
-            truncated.append({"start": w_start.isoformat(), "end": w_end.isoformat()})
-
-        stored = store_pitches(rows)
-        total_parsed += len(rows)
-        total_stored += stored
-        windows.append(
-            {
-                "start": w_start.isoformat(),
-                "end": w_end.isoformat(),
-                "rows_parsed": len(rows),
-                "rows_stored": stored,
-            }
-        )
-        logger.info(
-            "Statcast window %s..%s: parsed %d, stored %d", w_start, w_end, len(rows), stored
-        )
-
-
+    finally:
+        session.close()
 
     logger.info(
         "Statcast: parsed %d rows, stored %d (%s..%s, %d windows, %d errors)",
@@ -284,12 +325,13 @@ async def sync_statcast(
         "end": end.isoformat(),
         "season": season,
         "window_days": step,
+        "pause_seconds": pause,
         "windows": len(windows),
         "rows_parsed": total_parsed,
         "rows_stored": total_stored,
         "errors": errors,
         "truncated_windows": truncated,
         "window_detail": windows,
-
     }
+
 

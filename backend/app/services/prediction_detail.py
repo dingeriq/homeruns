@@ -282,21 +282,34 @@ def _find_todays_game(session: Session, team_abbr: Optional[str]):
     ).scalars().first()
 
 
-def _resolve_pitcher(session: Session, name: Optional[str]) -> Optional[PitcherInfo]:
-    if not name:
+def _resolve_pitcher(
+    session: Session, name: Optional[str], pitcher_id: Optional[int] = None
+) -> Optional[PitcherInfo]:
+    if not name and pitcher_id is None:
         return None
-    row = session.execute(
-        select(models.Player).where(models.Player.full_name == name)
-    ).scalars().first()
+    row = None
+    source = "game.probable_pitcher_id"
+    if pitcher_id is not None:
+        row = session.get(models.Player, pitcher_id)
+    if row is None and name:
+        source = "game.probable_pitcher (name match)"
+        row = session.execute(
+            select(models.Player).where(models.Player.full_name == name)
+        ).scalars().first()
     if row is None:
-        return PitcherInfo(full_name=name, source="game.probable_pitcher (unmatched in players)")
+        return PitcherInfo(
+            id=pitcher_id,
+            full_name=name or "",
+            source="game.probable_pitcher (unmatched in players)",
+        )
     return PitcherInfo(
         id=row.id,
         full_name=row.full_name,
         team_abbreviation=row.team_abbreviation,
         throws=row.throws,
-        source="game.probable_pitcher",
+        source=source,
     )
+
 
 
 def build_prediction_detail(session: Session, player_id: int) -> Optional[PredictionDetail]:

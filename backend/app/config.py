@@ -186,6 +186,32 @@ class Settings:
     openweather_api_base: str = field(
         default_factory=lambda: os.getenv("OPENWEATHER_API_BASE", "https://api.openweathermap.org")
     )
+    odds_api_key: Optional[str] = field(default_factory=lambda: _env("ODDS_API_KEY"))
+    odds_api_base: str = field(
+        default_factory=lambda: os.getenv("ODDS_API_BASE", "https://api.the-odds-api.com/v4")
+    )
+    odds_sport_key: str = field(
+        default_factory=lambda: os.getenv("ODDS_SPORT_KEY", "baseball_mlb")
+    )
+    odds_regions: str = field(default_factory=lambda: os.getenv("ODDS_REGIONS", "us"))
+    odds_format: str = field(default_factory=lambda: os.getenv("ODDS_FORMAT", "american"))
+    # Game-level markets come from the cheap bulk endpoint (1 credit per region).
+    odds_game_markets: List[str] = field(
+        default_factory=lambda: _split_csv(os.getenv("ODDS_GAME_MARKETS", "h2h,totals"))
+    )
+    # Player props + team totals are per-event markets (billed per market/region).
+    odds_event_markets: List[str] = field(
+        default_factory=lambda: _split_csv(
+            os.getenv("ODDS_EVENT_MARKETS", "batter_home_runs,team_totals")
+        )
+    )
+    # Guard rail so a scheduled run can never burn the monthly allowance.
+    odds_max_event_requests: int = field(
+        default_factory=lambda: int(os.getenv("ODDS_MAX_EVENT_REQUESTS", "16"))
+    )
+    odds_refresh_hours: int = field(
+        default_factory=lambda: int(os.getenv("ODDS_REFRESH_HOURS", "6"))
+    )
     weather_refresh_hours: int = field(
         default_factory=lambda: int(os.getenv("WEATHER_REFRESH_HOURS", "3"))
     )
@@ -201,6 +227,10 @@ class Settings:
     @property
     def openweather_is_configured(self) -> bool:
         return bool(self.openweather_api_key)
+
+    @property
+    def odds_is_configured(self) -> bool:
+        return bool(self.odds_api_key)
 
     @property
     def database_url_is_configured(self) -> bool:

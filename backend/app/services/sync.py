@@ -81,6 +81,8 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
                     "status": (g.get("status") or {}).get("detailedState", "Scheduled"),
                     "home_probable_pitcher": (home.get("probablePitcher") or {}).get("fullName"),
                     "away_probable_pitcher": (away.get("probablePitcher") or {}).get("fullName"),
+                    "home_probable_pitcher_id": (home.get("probablePitcher") or {}).get("id"),
+                    "away_probable_pitcher_id": (away.get("probablePitcher") or {}).get("id"),
                 }
             )
     with session_scope() as s:

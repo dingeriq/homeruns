@@ -262,7 +262,7 @@ def test_sync_stores_snapshots_matches_players_and_event(sqlite_db):
     assert result["errors"] == []
     assert result["quota_remaining"] == 480
 
-    with sqlia := sqlite_db.session_scope() as s:
+    with sqlite_db.session_scope() as s:
         event = s.get(models.OddsEvent, "evt1")
         assert event.game_id == 778001
         assert event.match_method == "team_names+date"

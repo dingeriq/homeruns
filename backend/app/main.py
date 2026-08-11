@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api import admin, games, health, lineups, metrics, players, predictions, teams, weather, park_factors
+from app.api import admin, games, health, lineups, metrics, odds, players, predictions, teams, weather, park_factors
 from app.config import settings
 from app.database.session import init_db
 from app.logging_config import configure_logging
@@ -115,6 +115,7 @@ app.include_router(admin.router)
 app.include_router(weather.router)
 app.include_router(park_factors.router)
 app.include_router(lineups.router)
+app.include_router(odds.router)
 app.include_router(metrics.router)
 
 

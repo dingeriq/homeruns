@@ -224,3 +224,107 @@ class GameLineup(Base):
         Index("ix_lineup_game_side_order", "game_id", "side", "batting_order"),
         Index("ix_lineup_player_date", "player_id", "game_date"),
     )
+
+
+class OddsEvent(Base):
+    """A sportsbook event, mapped to our MLB gamePk where possible."""
+
+    __tablename__ = "odds_events"
+
+    event_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sport_key: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    commence_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    home_team: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    away_team: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    game_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    game_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    # How the event was tied to an MLB game: 'team_names+date' | 'unmatched'
+    match_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    source: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
+class OddsSnapshot(Base):
+    """Immutable point-in-time sportsbook price.
+
+    Rows are append-only: a repeated identical quote is deduped by
+    ``snapshot_uid`` but a changed price writes a new row, so line movement is
+    fully preserved for later market-vs-model comparison.
+    """
+
+    __tablename__ = "odds_snapshots"
+
+    snapshot_uid: Mapped[str] = mapped_column(String(64), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(64), index=True)
+    game_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    game_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True, index=True)
+    commence_time: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    home_team: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    away_team: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    bookmaker: Mapped[str] = mapped_column(String(48), index=True)
+    bookmaker_title: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    market: Mapped[str] = mapped_column(String(48), index=True)
+
+    # Outcome identity: 'Over'/'Under'/'Yes'/'No'/team name, plus the player
+    # description the book supplies for player props.
+    outcome_name: Mapped[Optional[str]] = mapped_column(String(96), nullable=True)
+    outcome_description: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    outcome_point: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Canonical MLB person id when the prop could be resolved; never invented.
+    player_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    player_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True, index=True)
+    player_match_method: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
+    price: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    odds_format: Mapped[str] = mapped_column(String(16), default="american")
+    # Derived, stored alongside (never instead of) the raw price.
+    implied_probability: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    book_last_update: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    captured_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    source: Mapped[Optional[str]] = mapped_column(String(48), nullable=True)
+
+    __table_args__ = (
+        Index("ix_odds_event_market", "event_id", "market", "bookmaker"),
+        Index("ix_odds_player_market", "player_id", "market", "captured_at"),
+        Index("ix_odds_date_market", "game_date", "market"),
+    )
+
+
+class OddsPlayerMap(Base):
+    """Safe name->MLB id mapping layer for books that expose no player id.
+
+    This never mutates canonical ``players`` rows; it only records how a
+    sportsbook's player string was resolved, and lets a human pin a mapping.
+    """
+
+    __tablename__ = "odds_player_map"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    normalized_name: Mapped[str] = mapped_column(String(128), index=True)
+    source_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    team_abbreviation: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    player_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    # 'exact_name' | 'exact_name_team' | 'manual' | 'unresolved'
+    match_method: Mapped[str] = mapped_column(String(32), default="unresolved")
+    is_manual: Mapped[bool] = mapped_column(Boolean, default=False)
+    first_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (Index("ix_odds_player_map_key", "normalized_name", "team_abbreviation"),)

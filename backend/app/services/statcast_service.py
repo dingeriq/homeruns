@@ -91,14 +91,17 @@ class SavantClient:
                         headers={"User-Agent": "DingerIQ/0.1 (statcast ingest)"},
                     )
                     resp.raise_for_status()
-                    # Savant omits a charset in Content-Type; decode explicitly as
-                    # UTF-8 so accented names (Pérez, Sánchez) survive ingestion.
-                    return resp.content.decode("utf-8", errors="replace")
+                    # Savant omits a charset in Content-Type and prefixes the
+                    # export with a UTF-8 BOM; decode as utf-8-sig so accented
+                    # names survive AND the first header ("pitch_type") is not
+                    # mangled into "\ufeffpitch_type".
+                    return resp.content.decode("utf-8-sig", errors="replace")
         raise RuntimeError("unreachable")
 
 
 def parse_rows(csv_text: str) -> List[Dict[str, Any]]:
-    reader = csv.DictReader(io.StringIO(csv_text))
+    # Defensive: a BOM here would rename the first column and silently null it.
+    reader = csv.DictReader(io.StringIO(csv_text.lstrip("\ufeff")))
     rows: List[Dict[str, Any]] = []
     for r in reader:
         game_pk = _i(r, "game_pk")

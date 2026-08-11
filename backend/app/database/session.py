@@ -13,6 +13,7 @@ from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from app.config import (
     database_environment_presence,
     database_source,
+    pg_parts_presence,
     resolve_database_url,
     safe_database_target,
 )

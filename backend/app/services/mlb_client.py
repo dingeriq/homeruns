@@ -90,6 +90,12 @@ class MLBStatsClient:
     async def person(self, person_id: int) -> Dict[str, Any]:
         return await self._get(f"/people/{person_id}")
 
+    async def people(self, person_ids: Any) -> Dict[str, Any]:
+        """Batch identity lookup by MLB person id (never by name)."""
+        ids = ",".join(str(int(pid)) for pid in person_ids)
+        return await self._get("/people", params={"personIds": ids})
+
     async def boxscore(self, game_pk: int) -> Dict[str, Any]:
         """Live boxscore — carries ``battingOrder`` once a lineup is submitted."""
         return await self._get(f"/game/{game_pk}/boxscore")
+

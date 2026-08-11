@@ -4,7 +4,17 @@ from __future__ import annotations
 from datetime import date, datetime
 from typing import Optional
 
-from sqlalchemy import Boolean, Date, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import (
+    Boolean,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
@@ -33,6 +43,10 @@ class Player(Base):
     position: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
     bats: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
     throws: Mapped[Optional[str]] = mapped_column(String(2), nullable=True)
+    # Identity metadata filled by the historical backfill (MLB Stats API only).
+    is_active: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    last_seen_season: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+
 
 
 class Game(Base):

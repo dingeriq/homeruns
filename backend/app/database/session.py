@@ -148,7 +148,10 @@ _COLUMN_MIGRATIONS = (
     ("games", "home_probable_pitcher_id", "INTEGER"),
     ("games", "away_probable_pitcher_id", "INTEGER"),
     ("games", "venue_id", "INTEGER"),
+    ("players", "is_active", "BOOLEAN"),
+    ("players", "last_seen_season", "SMALLINT"),
 )
+
 
 
 def _ensure_columns() -> None:

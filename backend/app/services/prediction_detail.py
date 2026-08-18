@@ -274,18 +274,72 @@ def _head_to_head(session: Session, batter_id: int, pitcher_id: int) -> Dict[str
     }
 
 
+class _LineupGame:
+    """Minimal stand-in for a ``games`` row, built from stored lineup data.
+
+    Used only when the schedule table has no row for today but ``game_lineups``
+    already identifies the game. Exposes the same attribute surface the caller
+    reads; unknown schedule fields stay ``None``.
+    """
+
+    def __init__(self, game_id: int, game_day: date, home_team, away_team, side: str):
+        self.game_id = game_id
+        self.game_date = game_day
+        self.game_datetime = datetime.combine(game_day, time.min)
+        self.home_team = home_team
+        self.away_team = away_team
+        self.venue = None
+        self.venue_id = None
+        self.status = "lineup-only"
+        self.home_probable_pitcher = None
+        self.away_probable_pitcher = None
+        self.home_probable_pitcher_id = None
+        self.away_probable_pitcher_id = None
+        self.side = side
+
+
+def _game_from_lineups(session: Session, team_abbr: str, day: date):
+    """Fallback game resolution from ``game_lineups`` (schedule row missing)."""
+    L = models.GameLineup
+    row = session.execute(
+        select(L)
+        .where(L.game_date == day, L.team_abbreviation == team_abbr)
+        .order_by(L.game_id)
+    ).scalars().first()
+    if row is None:
+        return None
+    opponent = session.execute(
+        select(L.team_abbreviation)
+        .where(L.game_id == row.game_id, L.side != row.side)
+        .limit(1)
+    ).scalars().first()
+    is_home = row.side == "home"
+    return _LineupGame(
+        game_id=row.game_id,
+        game_day=row.game_date or day,
+        home_team=team_abbr if is_home else opponent,
+        away_team=opponent if is_home else team_abbr,
+        side=row.side,
+    )
+
+
 def _find_todays_game(session: Session, team_abbr: Optional[str]):
     if not team_abbr:
         return None
+    today = date.today()
     G = models.Game
-    return session.execute(
+    row = session.execute(
         select(G)
         .where(
-            G.game_date == date.today(),
+            G.game_date == today,
             (G.home_team == team_abbr) | (G.away_team == team_abbr),
         )
         .order_by(G.game_datetime)
     ).scalars().first()
+    if row is not None:
+        return row
+    return _game_from_lineups(session, team_abbr, today)
+
 
 
 def _resolve_pitcher(

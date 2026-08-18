@@ -11,7 +11,7 @@ Design rules:
 """
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -313,6 +313,7 @@ def _game_from_lineups(session: Session, team_abbr: str, day: date):
         .where(L.game_id == row.game_id, L.side != row.side)
         .limit(1)
     ).scalars().first()
+    opponent = opponent or "TBD"
     is_home = row.side == "home"
     return _LineupGame(
         game_id=row.game_id,

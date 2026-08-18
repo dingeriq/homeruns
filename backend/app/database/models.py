@@ -14,6 +14,7 @@ from sqlalchemy import (
     Integer,
     SmallInteger,
     String,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -342,3 +343,68 @@ class OddsPlayerMap(Base):
     )
 
     __table_args__ = (Index("ix_odds_player_map_key", "normalized_name", "team_abbreviation"),)
+
+
+class FeatureSnapshot(Base):
+    """Leak-safe V1 feature vector for one (batter, game), as of the day before.
+
+    Every value here was computed from ``game_date < game_date_of_target`` only;
+    ``hit_hr`` is the label and is the single field derived from the target game.
+    """
+
+    __tablename__ = "feature_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    batter_id: Mapped[int] = mapped_column(Integer, index=True)
+    pitcher_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    game_id: Mapped[int] = mapped_column(Integer, index=True)
+    game_date: Mapped[date] = mapped_column(Date, index=True)
+    feature_set_version: Mapped[str] = mapped_column(String(16), index=True, default="v1")
+    as_of_date: Mapped[date] = mapped_column(Date, index=True)
+    window_days: Mapped[int] = mapped_column(Integer, default=30)
+
+    # Batter features
+    batter_barrel_rate_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    batter_hard_hit_rate_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    batter_max_exit_velocity_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    batter_fly_ball_rate_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    batter_hr_per_pa_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Pitcher features
+    pitcher_barrel_rate_allowed_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pitcher_hard_hit_rate_allowed_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pitcher_fly_ball_rate_allowed_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    pitcher_hr_per_pa_allowed_30d: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Matchup / context
+    platoon_advantage: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    park_hr_factor: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    park_hr_factor_handedness: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    weather_temperature_f: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    weather_wind_out_component: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    expected_plate_appearances: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    lineup_slot: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+
+    # Sample sizes / denominators — never null-washed into the rates above.
+    batter_pitches_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    batter_batted_balls_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    batter_pa_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    batter_home_runs_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pitcher_pitches_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pitcher_batted_balls_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pitcher_pa_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    pitcher_home_runs_allowed_30d: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    # Label — the ONLY field sourced from the target game itself.
+    hit_hr: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "batter_id", "game_id", "feature_set_version", name="uq_feature_snapshot_key"
+        ),
+        Index("ix_feature_snapshot_date", "game_date", "feature_set_version"),
+    )

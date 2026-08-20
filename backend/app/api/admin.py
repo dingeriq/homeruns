@@ -7,7 +7,14 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.database.session import session_scope
 from app.monitoring import record_synced_counts, track_job
+from app.services.hr_model import model_status, save_artifact, train_model
+from app.services.training_dataset import (
+    build_snapshots,
+    corpus_summary,
+    load_training_rows,
+)
 from app.services.data_audit import run_audit
 from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups
@@ -171,3 +178,84 @@ async def trigger_player_backfill(
         }
     )
     return {"status": "ok", "player_backfill": result}
+
+
+# ---------------------------------------------------------------------------
+# V1 model controls — manual only. Nothing here runs on startup or in the
+# scheduler; snapshots and training are always operator-triggered.
+# ---------------------------------------------------------------------------
+
+
+def _build_snapshots_sync(start: date, end: date, limit: Optional[int], window_days: int) -> dict:
+    with session_scope() as s:
+        return build_snapshots(s, start, end, limit=limit, window_days=window_days)
+
+
+def _train_sync(start: Optional[date], end: Optional[date], min_rows: int) -> dict:
+    with session_scope() as s:
+        rows = load_training_rows(s, start=start, end=end)
+        summary = corpus_summary(s)
+    artifact = train_model(rows, min_rows=min_rows)
+    path = save_artifact(artifact)
+    return {
+        "corpus": summary,
+        "rows_used": len(rows),
+        "model_version": artifact.get("model_version"),
+        "feature_set_version": artifact.get("feature_set_version"),
+        "trained_at": artifact.get("trained_at"),
+        "n_train": artifact.get("n_train"),
+        "n_holdout": artifact.get("n_holdout"),
+        "base_rate": artifact.get("base_rate"),
+        "metrics": artifact.get("metrics"),
+        "artifact_path": str(path),
+    }
+
+
+@router.post("/build-snapshots")
+async def trigger_build_snapshots(
+    start: date = Query(..., description="First game date (inclusive)"),
+    end: date = Query(..., description="Last game date (inclusive)"),
+    limit: Optional[int] = Query(
+        None, ge=1, description="Cap the number of (batter, game) pairs processed"
+    ),
+    window_days: int = Query(30, ge=1, le=365, description="Trailing feature window"),
+) -> dict:
+    """Materialise leak-safe labelled ``feature_snapshots`` for a date range."""
+    if start > end:
+        raise HTTPException(status_code=400, detail="start must be on or before end")
+    with track_job("manual_build_snapshots"):
+        result = await asyncio.to_thread(_build_snapshots_sync, start, end, limit, window_days)
+    record_synced_counts({"feature_snapshots": result.get("snapshots_written", 0)})
+    return {"status": "ok", "snapshots": result}
+
+
+@router.post("/train-model")
+async def trigger_train_model(
+    start: Optional[date] = Query(None, description="Restrict corpus to game_date >= start"),
+    end: Optional[date] = Query(None, description="Restrict corpus to game_date <= end"),
+    min_rows: int = Query(200, ge=50, description="Minimum labelled rows required to train"),
+) -> dict:
+    """Train + calibrate the V1 model from stored snapshots and persist it."""
+    if start and end and start > end:
+        raise HTTPException(status_code=400, detail="start must be on or before end")
+    try:
+        with track_job("manual_train_model"):
+            result = await asyncio.to_thread(_train_sync, start, end, min_rows)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    record_synced_counts({"model_training_rows": result.get("rows_used", 0)})
+    return {"status": "ok", "training": result}
+
+
+@router.get("/model-status")
+async def get_model_status() -> dict:
+    """Registered model artifact + labelled corpus summary (read-only)."""
+    status = model_status()
+    corpus: Optional[dict]
+    try:
+        with session_scope() as s:
+            corpus = corpus_summary(s)
+    except Exception:
+        corpus = None
+    return {"model": status, "corpus": corpus}
+

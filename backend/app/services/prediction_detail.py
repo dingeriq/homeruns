@@ -11,7 +11,7 @@ Design rules:
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -21,6 +21,7 @@ from app.database import models
 from app.services.lineups import lineup_slot_for_player
 from app.services.odds_service import market_for_player
 from app.services.park_factors import park_factors_for_venue
+from app.services.scoring import score_player
 from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
     DataAvailability,
@@ -633,21 +634,61 @@ def build_prediction_detail(session: Session, player_id: int) -> Optional[Predic
     )
     (available if len(missing) < len(feature_values) else unavailable).append("model_features")
 
-    unavailable.extend(["prediction", "explanation"])
-    notes["prediction"] = (
-        "No trained DingerIQ model is wired in yet. Probability and confidence stay null "
-        "rather than being fabricated."
+    # Model scoring is delegated to the shared scoring service — no model logic
+    # is duplicated here.
+    scored = score_player(
+        session,
+        player_id,
+        game_id=game.game_id if game else None,
+        game_date=(game.game_date.date() if game and game.game_date else None),
+        pitcher_id=pitcher_id,
+        venue_id=game.venue_id if game else None,
+        venue_name=game.venue if game else None,
     )
-    notes["explanation"] = "Explanations (SHAP) become available once the model is served."
+    if scored.get("status") == "ok":
+        available.extend(["prediction"])
+        unavailable.append("explanation")
+        prediction = PredictionResult(
+            hr_probability=scored.get("hr_probability"),
+            confidence=scored.get("confidence"),
+            model_version=scored.get("model_version"),
+            generated_at=datetime.now(timezone.utc),
+            status="ok",
+        )
+        notes["prediction"] = (
+            f"Scored with {scored.get('model_version')} using "
+            f"{scored.get('features_used')}/{scored.get('features_total')} real feature values; "
+            "confidence is the share of inputs that were not median-imputed."
+        )
+        notes["explanation"] = (
+            "Per-factor attributions (SHAP) are not served yet; no weights are invented."
+        )
+        explanation = Explanation(
+            status="unavailable",
+            summary=(
+                "Model probability is available; per-factor attribution is not served yet."
+            ),
+        )
+    else:
+        unavailable.extend(["prediction", "explanation"])
+        notes["prediction"] = scored.get(
+            "reason",
+            "No trained DingerIQ model is registered. Probability and confidence stay null "
+            "rather than being fabricated.",
+        )
+        notes["explanation"] = "Explanations (SHAP) become available once the model is served."
+        prediction = PredictionResult(
+            status="unavailable",
+            reason=scored.get(
+                "reason",
+                "model_not_available: no trained model artifact is registered for scoring.",
+            ),
+        )
+        explanation = Explanation(
+            status="unavailable",
+            summary="Explanations require a served model; no factor weights are invented here.",
+        )
 
-    prediction = PredictionResult(
-        status="unavailable",
-        reason="model_not_available: no trained model artifact is registered for scoring.",
-    )
-    explanation = Explanation(
-        status="unavailable",
-        summary="Explanations require a served model; no factor weights are invented here.",
-    )
 
     return PredictionDetail(
         player=player,

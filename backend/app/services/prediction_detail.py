@@ -11,7 +11,7 @@ Design rules:
 """
 from __future__ import annotations
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import func, select
@@ -21,6 +21,7 @@ from app.database import models
 from app.services.lineups import lineup_slot_for_player
 from app.services.odds_service import market_for_player
 from app.services.park_factors import park_factors_for_venue
+from app.services.scoring import score_player
 from app.services.weather_service import weather_for_game
 from app.models.prediction_detail import (
     DataAvailability,

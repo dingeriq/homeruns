@@ -7,7 +7,14 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.database.session import session_scope
 from app.monitoring import record_synced_counts, track_job
+from app.services.hr_model import model_status, save_artifact, train_model
+from app.services.training_dataset import (
+    build_snapshots,
+    corpus_summary,
+    load_training_rows,
+)
 from app.services.data_audit import run_audit
 from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups

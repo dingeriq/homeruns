@@ -16,9 +16,14 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
 )
+from sqlalchemy import JSON
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.database.session import Base
+
+#: JSON on SQLite (tests), JSONB on PostgreSQL (production).
+JSONVariant = JSON().with_variant(JSONB(), "postgresql")
 
 
 class Team(Base):
@@ -407,4 +412,69 @@ class FeatureSnapshot(Base):
             "batter_id", "game_id", "feature_set_version", name="uq_feature_snapshot_key"
         ),
         Index("ix_feature_snapshot_date", "game_date", "feature_set_version"),
+    )
+
+
+class ModelArtifact(Base):
+    """Durable copy of a trained model artifact.
+
+    The filesystem copy is ephemeral on container platforms; this table is the
+    authoritative fallback so scoring survives a redeploy. Exactly one row is
+    ``is_active`` at a time. Nothing here is ever mutated by scoring.
+    """
+
+    __tablename__ = "model_artifacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_version: Mapped[str] = mapped_column(String(64), index=True)
+    feature_set_version: Mapped[str] = mapped_column(String(16), index=True, default="v1")
+    trained_at: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    payload: Mapped[dict] = mapped_column(JSONVariant, nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("model_version", name="uq_model_artifact_version"),
+        Index("ix_model_artifact_active", "is_active", "model_version"),
+    )
+
+
+class DailyPrediction(Base):
+    """One persisted HR probability for a (slate date, game, batter, model).
+
+    Written only by the explicit ``POST /admin/score-slate`` run; read by
+    ``GET /predictions/today``. Re-scoring updates in place.
+    """
+
+    __tablename__ = "daily_predictions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    game_date: Mapped[date] = mapped_column(Date, index=True)
+    game_id: Mapped[int] = mapped_column(Integer, index=True)
+    player_id: Mapped[int] = mapped_column(Integer, index=True)
+    player_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    team_abbreviation: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    lineup_slot: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    hr_probability: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    model_version: Mapped[str] = mapped_column(String(64), index=True)
+    feature_set_version: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    features_used: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    features_total: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    imputed_features: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+    created_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "game_date", "game_id", "player_id", "model_version",
+            name="uq_daily_prediction_key",
+        ),
+        Index("ix_daily_prediction_date_prob", "game_date", "hr_probability"),
     )

@@ -254,34 +254,142 @@ def train_model(
     return artifact
 
 
-def save_artifact(artifact: Dict[str, Any], path: Optional[Path] = None) -> Path:
+def save_artifact(
+    artifact: Dict[str, Any], path: Optional[Path] = None, *, persist_db: bool = True
+) -> Path:
+    """Write the artifact to disk and (best effort) to ``model_artifacts``.
+
+    The filesystem copy stays the fast path; the database row is the durable
+    fallback that survives a container redeploy. A database failure never blocks
+    the local write.
+    """
     target = Path(path) if path else artifact_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
     _CACHE["path"] = None  # invalidate
+    if persist_db:
+        try:
+            save_artifact_to_db(artifact)
+        except Exception:  # pragma: no cover - DB down must not break training
+            logger.exception("could not persist model artifact to database")
     return target
+
+
+# ---------------------------------------------------------------------------
+# Durable artifact storage (database)
+# ---------------------------------------------------------------------------
+
+def save_artifact_to_db(artifact: Dict[str, Any], session: Any = None) -> Dict[str, Any]:
+    """Upsert ``artifact`` as the single active row in ``model_artifacts``.
+
+    Keyed on ``model_version``; re-saving the same version updates in place.
+    Every other row is deactivated so exactly one model is active.
+    """
+    if session is not None:
+        return _save_artifact_to_db(session, artifact)
+    from app.database.session import session_scope
+
+    with session_scope() as s:
+        return _save_artifact_to_db(s, artifact)
+
+
+def _save_artifact_to_db(session: Any, artifact: Dict[str, Any]) -> Dict[str, Any]:
+    from sqlalchemy import select, update
+
+    from app.database import models
+
+    version = str(artifact.get("model_version") or MODEL_VERSION)
+    A = models.ModelArtifact
+    session.execute(update(A).values(is_active=False).where(A.is_active.is_(True)))
+    row = session.execute(select(A).where(A.model_version == version)).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    if row is None:
+        row = A(
+            model_version=version,
+            feature_set_version=str(artifact.get("feature_set_version") or FEATURE_SET_VERSION),
+            trained_at=str(artifact.get("trained_at") or ""),
+            payload=artifact,
+            is_active=True,
+            created_at=now,
+        )
+        session.add(row)
+        action = "inserted"
+    else:
+        row.feature_set_version = str(
+            artifact.get("feature_set_version") or FEATURE_SET_VERSION
+        )
+        row.trained_at = str(artifact.get("trained_at") or "")
+        row.payload = artifact
+        row.is_active = True
+        action = "updated"
+    session.flush()
+    return {
+        "action": action,
+        "model_version": version,
+        "feature_set_version": row.feature_set_version,
+        "trained_at": row.trained_at,
+        "is_active": True,
+    }
+
+
+def load_artifact_from_db(session: Any = None) -> Optional[Dict[str, Any]]:
+    """Return the active stored artifact payload, or ``None``."""
+    try:
+        if session is not None:
+            return _load_artifact_from_db(session)
+        from app.database.session import session_scope
+
+        with session_scope() as s:
+            return _load_artifact_from_db(s)
+    except Exception:  # pragma: no cover - DB unreachable => no model, not a crash
+        logger.exception("could not read model artifact from database")
+        return None
+
+
+def _load_artifact_from_db(session: Any) -> Optional[Dict[str, Any]]:
+    from sqlalchemy import select
+
+    from app.database import models
+
+    A = models.ModelArtifact
+    row = session.execute(
+        select(A).where(A.is_active.is_(True)).order_by(A.id.desc())
+    ).scalars().first()
+    if row is None or not row.payload:
+        return None
+    payload = row.payload
+    return dict(payload) if isinstance(payload, dict) else None
 
 
 _CACHE: Dict[str, Any] = {"path": None, "artifact": None, "mtime": None}
 
 
 def load_artifact(path: Optional[Path] = None) -> Optional[Dict[str, Any]]:
-    """Return the on-disk artifact, or ``None`` when no model is registered."""
+    """Return the registered artifact: local file first, database fallback.
+
+    Falls through to the durable ``model_artifacts`` row when the local file is
+    missing (fresh container) or unreadable. Returns ``None`` only when neither
+    source holds a usable artifact — callers must then surface
+    ``model_not_available`` rather than invent a probability.
+    """
     target = Path(path) if path else artifact_path()
     try:
-        mtime = target.stat().st_mtime
+        mtime: Optional[float] = target.stat().st_mtime
     except OSError:
-        _CACHE.update({"path": None, "artifact": None, "mtime": None})
-        return None
-    if _CACHE["path"] == str(target) and _CACHE["mtime"] == mtime:
-        return _CACHE["artifact"]
-    try:
-        artifact = json.loads(target.read_text(encoding="utf-8"))
-    except Exception:  # corrupt artifact must never crash scoring
-        logger.exception("unreadable model artifact at %s", target)
-        return None
-    _CACHE.update({"path": str(target), "artifact": artifact, "mtime": mtime})
-    return artifact
+        mtime = None
+    if mtime is not None:
+        if _CACHE["path"] == str(target) and _CACHE["mtime"] == mtime:
+            return _CACHE["artifact"]
+        try:
+            artifact = json.loads(target.read_text(encoding="utf-8"))
+            _CACHE.update({"path": str(target), "artifact": artifact, "mtime": mtime})
+            return artifact
+        except Exception:  # corrupt artifact must never crash scoring
+            logger.exception("unreadable model artifact at %s — trying database", target)
+
+    _CACHE.update({"path": None, "artifact": None, "mtime": None})
+    return load_artifact_from_db()
+
 
 
 def model_status(path: Optional[Path] = None) -> Dict[str, Any]:

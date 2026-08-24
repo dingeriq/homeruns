@@ -216,7 +216,7 @@ def test_stored_predictions_respects_limit(session, trained):
     assert len(stored_predictions(session, DAY, limit=2)["predictions"]) == 2
 
 
-def test_predictions_today_endpoint_shape(client):
+def test_predictions_today_endpoint_shape(client, require_db):
     resp = client.get("/predictions/today")
     assert resp.status_code == 200
     body = resp.json()
@@ -225,6 +225,6 @@ def test_predictions_today_endpoint_shape(client):
         assert 0.0 <= item["hr_probability"] <= 1.0
 
 
-def test_prediction_status_endpoint(client):
+def test_prediction_status_endpoint(client, require_db):
     resp = client.get("/admin/prediction-status")
     assert resp.status_code in {200, 503}

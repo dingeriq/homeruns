@@ -9,7 +9,13 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.database.session import session_scope
 from app.monitoring import record_synced_counts, track_job
-from app.services.hr_model import model_status, save_artifact, train_model
+from app.services.hr_model import (
+    load_artifact,
+    model_status,
+    save_artifact,
+    save_artifact_to_db,
+    train_model,
+)
 from app.services.training_dataset import (
     build_snapshots,
     corpus_summary,
@@ -22,6 +28,7 @@ from app.services.park_factors import compute_park_factors
 from app.services.player_backfill import backfill_players
 from app.services.statcast_audit import run_statcast_audit
 from app.services.statcast_service import sync_statcast
+from app.services.scoring import prediction_status, store_slate_predictions
 from app.services.sync import run_full_sync
 from app.services.odds_service import OddsApiNotConfigured, sync_odds
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
@@ -245,6 +252,66 @@ async def trigger_train_model(
         raise HTTPException(status_code=409, detail=str(exc))
     record_synced_counts({"model_training_rows": result.get("rows_used", 0)})
     return {"status": "ok", "training": result}
+
+
+def _score_slate_sync(day: Optional[date], limit: Optional[int]) -> dict:
+    with session_scope() as s:
+        return store_slate_predictions(s, day, limit=limit)
+
+
+@router.post("/score-slate")
+async def trigger_score_slate(
+    on: Optional[date] = Query(None, description="Slate date to score (default: today)"),
+    limit: Optional[int] = Query(None, ge=1, description="Cap the number of hitters stored"),
+) -> dict:
+    """Score the stored slate with the registered V1 model and persist results.
+
+    Idempotent on ``(game_date, game_id, player_id, model_version)``. Performs no
+    ingestion and makes no Odds or weather calls.
+    """
+    with track_job("manual_score_slate"):
+        result = await asyncio.to_thread(_score_slate_sync, on, limit)
+    record_synced_counts({"daily_predictions": result.get("predictions_scored", 0)})
+    return {"status": result.get("status", "unavailable"), "scoring": result}
+
+
+@router.get("/prediction-status")
+async def get_prediction_status(
+    on: Optional[date] = Query(None, description="Restrict the report to one slate date"),
+) -> dict:
+    """Read-only inventory of persisted daily predictions."""
+    def _run() -> dict:
+        with session_scope() as s:
+            return prediction_status(s, on)
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"prediction status unavailable: {type(exc).__name__}"
+        )
+
+
+@router.post("/persist-artifact")
+async def persist_artifact() -> dict:
+    """Import the existing local model artifact into ``model_artifacts``.
+
+    Read-then-write only: the artifact is copied verbatim — coefficients,
+    preprocessing, calibration and versions are untouched. No retraining.
+    """
+    artifact = load_artifact()
+    if artifact is None:
+        raise HTTPException(
+            status_code=409,
+            detail="model_not_available: no local or stored artifact to persist.",
+        )
+    try:
+        result = await asyncio.to_thread(save_artifact_to_db, artifact)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"artifact persistence failed: {type(exc).__name__}"
+        )
+    return {"status": "ok", "artifact": result}
 
 
 @router.get("/model-status")

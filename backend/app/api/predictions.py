@@ -9,7 +9,7 @@ from app.database.session import session_scope
 from app.models.prediction_detail import PredictionDetail
 from app.models.schemas import Prediction
 from app.services.prediction_detail import build_prediction_detail
-from app.services.scoring import score_slate
+from app.services.scoring import stored_predictions
 
 router = APIRouter(prefix="/predictions", tags=["predictions"])
 
@@ -19,13 +19,14 @@ async def predictions_today(
     on: Optional[date] = Query(None, description="Slate date (default: today)"),
     limit: Optional[int] = Query(None, ge=1, le=500, description="Cap returned rows"),
 ) -> List[Prediction]:
-    """Ranked HR probabilities for today's stored starters.
+    """Ranked HR probabilities read from persisted ``daily_predictions``.
 
-    Returns an empty list when no model artifact is registered or no lineup is
-    stored for the slate — probabilities are never fabricated.
+    This is a single indexed read — the expensive scoring pass happens only when
+    ``POST /admin/score-slate`` is run. Returns an empty list when nothing is
+    persisted for the slate; probabilities are never fabricated.
     """
     with session_scope() as s:
-        result = score_slate(s, on, limit=limit)
+        result = stored_predictions(s, on, limit=limit)
     if result.get("status") != "ok":
         return []
     return [

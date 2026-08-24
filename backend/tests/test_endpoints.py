@@ -162,7 +162,7 @@ def test_players_names_are_utf8_decodable(require_db, client: httpx.Client) -> N
 # /predictions/today (placeholder until the model ships)
 # --------------------------------------------------------------------------
 
-def test_predictions_today_returns_list(client: httpx.Client) -> None:
+def test_predictions_today_returns_list(client: httpx.Client, require_db) -> None:
     res = client.get("/predictions/today")
     assert res.status_code == 200
     assert isinstance(res.json(), list)

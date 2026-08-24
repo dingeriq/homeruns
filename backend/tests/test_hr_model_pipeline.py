@@ -179,7 +179,7 @@ def test_score_player_ok_and_fallback(session, artifact_file):
 # API surface
 # ---------------------------------------------------------------------------
 
-def test_predictions_today_response_shape(client):
+def test_predictions_today_response_shape(client, require_db):
     resp = client.get("/predictions/today")
     assert resp.status_code == 200
     body = resp.json()

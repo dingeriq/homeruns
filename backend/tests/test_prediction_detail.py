@@ -148,7 +148,7 @@ def test_invalid_player_id_is_validated(client: httpx.Client, bad: str) -> None:
     assert res.json()["error"] == "ValidationError"
 
 
-def test_predictions_today_still_works(client: httpx.Client) -> None:
+def test_predictions_today_still_works(client: httpx.Client, require_db) -> None:
     res = client.get("/predictions/today")
     assert res.status_code == 200
     assert isinstance(res.json(), list)

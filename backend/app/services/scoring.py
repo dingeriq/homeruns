@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.database import models
-from app.services.feature_builder import build_features
+from app.services.feature_builder import FEATURE_SET_VERSION, build_features
 from app.services.hr_model import load_artifact, predict
 
 logger = logging.getLogger("dingeriq.scoring")
@@ -174,4 +174,191 @@ def score_player(
     return scored
 
 
-__all__ = ["score_player", "score_slate"]
+__all__ = [
+    "prediction_status",
+    "score_player",
+    "score_slate",
+    "store_slate_predictions",
+    "stored_predictions",
+]
+
+
+# ---------------------------------------------------------------------------
+# Persistence — the expensive scoring run happens here, once, on demand.
+# ---------------------------------------------------------------------------
+
+def store_slate_predictions(
+    session: Session,
+    day: Optional[date] = None,
+    *,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Score ``day`` with the existing V1 model and upsert ``daily_predictions``.
+
+    Idempotent on ``(game_date, game_id, player_id, model_version)`` — a re-run
+    updates the stored row in place instead of duplicating it. No ingestion, no
+    odds, no weather calls, no training.
+    """
+    from datetime import datetime, timezone
+
+    from sqlalchemy import select as _select
+
+    day = day or date.today()
+    result = score_slate(session, day, limit=limit)
+    if result.get("status") != "ok":
+        return {
+            "status": result.get("status"),
+            "reason": result.get("reason"),
+            "game_date": str(day),
+            "model_version": result.get("model_version"),
+            "predictions_scored": 0,
+            "inserted": 0,
+            "updated": 0,
+        }
+
+    D = models.DailyPrediction
+    now = datetime.now(timezone.utc)
+    inserted = updated = 0
+    for p in result["predictions"]:
+        version = p["model_version"]
+        row = session.execute(
+            _select(D).where(
+                D.game_date == day,
+                D.game_id == p["game_id"],
+                D.player_id == p["player_id"],
+                D.model_version == version,
+            )
+        ).scalar_one_or_none()
+        values = {
+            "player_name": p.get("player_name"),
+            "team_abbreviation": p.get("team"),
+            "lineup_slot": p.get("lineup_slot"),
+            "hr_probability": p["hr_probability"],
+            "confidence": p.get("confidence"),
+            "feature_set_version": FEATURE_SET_VERSION,
+            "features_used": p.get("features_used"),
+            "features_total": p.get("features_total"),
+            "imputed_features": p.get("imputed_features"),
+            "updated_at": now,
+        }
+        if row is None:
+            session.add(
+                D(
+                    game_date=day,
+                    game_id=p["game_id"],
+                    player_id=p["player_id"],
+                    model_version=version,
+                    created_at=now,
+                    **values,
+                )
+            )
+            inserted += 1
+        else:
+            for key, value in values.items():
+                setattr(row, key, value)
+            updated += 1
+    session.flush()
+    return {
+        "status": "ok",
+        "reason": None,
+        "game_date": str(day),
+        "model_version": result.get("model_version"),
+        "predictions_scored": len(result["predictions"]),
+        "inserted": inserted,
+        "updated": updated,
+    }
+
+
+def stored_predictions(
+    session: Session,
+    day: Optional[date] = None,
+    *,
+    limit: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Read persisted predictions for ``day``, ranked by probability desc.
+
+    This is a single indexed query — no feature building, no model inference.
+    """
+    from sqlalchemy import select as _select
+
+    day = day or date.today()
+    D = models.DailyPrediction
+    stmt = (
+        _select(D)
+        .where(D.game_date == day)
+        .order_by(D.hr_probability.desc(), D.player_id)
+    )
+    if limit:
+        stmt = stmt.limit(limit)
+    rows = list(session.execute(stmt).scalars())
+    if not rows:
+        return {
+            "status": "unavailable",
+            "reason": (
+                "no_stored_predictions: no predictions are persisted for this date. "
+                "Run POST /admin/score-slate once lineups are stored."
+            ),
+            "game_date": str(day),
+            "model_version": None,
+            "predictions": [],
+        }
+    return {
+        "status": "ok",
+        "reason": None,
+        "game_date": str(day),
+        "model_version": rows[0].model_version,
+        "predictions": [
+            {
+                "player_id": r.player_id,
+                "player_name": r.player_name or str(r.player_id),
+                "game_id": r.game_id,
+                "hr_probability": r.hr_probability,
+                "confidence": r.confidence,
+                "model_version": r.model_version,
+                "feature_set_version": r.feature_set_version,
+                "features_used": r.features_used,
+                "features_total": r.features_total,
+                "imputed_features": r.imputed_features,
+                "lineup_slot": r.lineup_slot,
+                "team": r.team_abbreviation,
+            }
+            for r in rows
+        ],
+    }
+
+
+def prediction_status(session: Session, day: Optional[date] = None) -> Dict[str, Any]:
+    """Read-only inventory of persisted predictions (whole table or one date)."""
+    from sqlalchemy import func, select as _select
+
+    D = models.DailyPrediction
+    where = [D.game_date == day] if day else []
+    total, players, games, first_ts, last_ts, first_day, last_day = session.execute(
+        _select(
+            func.count(D.id),
+            func.count(func.distinct(D.player_id)),
+            func.count(func.distinct(D.game_id)),
+            func.min(D.created_at),
+            func.max(D.updated_at),
+            func.min(D.game_date),
+            func.max(D.game_date),
+        ).where(*where)
+    ).one()
+    versions = [
+        v
+        for v in session.execute(
+            _select(D.model_version).where(*where).group_by(D.model_version)
+        ).scalars()
+    ]
+    return {
+        "predictions_stored": int(total or 0),
+        "game_date": str(day) if day else None,
+        "model_versions": versions,
+        "model_version": versions[0] if len(versions) == 1 else None,
+        "earliest_prediction": str(first_ts) if first_ts else None,
+        "latest_prediction": str(last_ts) if last_ts else None,
+        "unique_players": int(players or 0),
+        "unique_games": int(games or 0),
+        "first_game_date": str(first_day) if first_day else None,
+        "last_game_date": str(last_day) if last_day else None,
+    }

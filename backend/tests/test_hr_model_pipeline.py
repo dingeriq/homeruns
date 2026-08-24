@@ -42,6 +42,7 @@ def session():
 def artifact_file(tmp_path, monkeypatch):
     path = tmp_path / "hr_model_test.json"
     monkeypatch.setenv("MODEL_ARTIFACT_PATH", str(path))
+    monkeypatch.setenv("MODEL_ARTIFACT_DB_PERSIST", "0")
     hr_model._CACHE.update({"path": None, "artifact": None, "mtime": None})
     yield path
     hr_model._CACHE.update({"path": None, "artifact": None, "mtime": None})
@@ -178,7 +179,7 @@ def test_score_player_ok_and_fallback(session, artifact_file):
 # API surface
 # ---------------------------------------------------------------------------
 
-def test_predictions_today_response_shape(client):
+def test_predictions_today_response_shape(client, require_db):
     resp = client.get("/predictions/today")
     assert resp.status_code == 200
     body = resp.json()

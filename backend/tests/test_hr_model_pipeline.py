@@ -42,6 +42,7 @@ def session():
 def artifact_file(tmp_path, monkeypatch):
     path = tmp_path / "hr_model_test.json"
     monkeypatch.setenv("MODEL_ARTIFACT_PATH", str(path))
+    monkeypatch.setenv("MODEL_ARTIFACT_DB_PERSIST", "0")
     hr_model._CACHE.update({"path": None, "artifact": None, "mtime": None})
     yield path
     hr_model._CACHE.update({"path": None, "artifact": None, "mtime": None})

@@ -267,7 +267,7 @@ def save_artifact(
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(artifact, indent=2), encoding="utf-8")
     _CACHE["path"] = None  # invalidate
-    if persist_db:
+    if persist_db and os.environ.get("MODEL_ARTIFACT_DB_PERSIST", "1") != "0":
         try:
             save_artifact_to_db(artifact)
         except Exception:  # pragma: no cover - DB down must not break training
@@ -455,6 +455,8 @@ def predict(
 __all__ = [
     "MODEL_VERSION",
     "artifact_path",
+    "load_artifact_from_db",
+    "save_artifact_to_db",
     "brier",
     "load_artifact",
     "log_loss",

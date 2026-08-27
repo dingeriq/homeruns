@@ -204,10 +204,14 @@ export const featuredMatchupQuery = () =>
       withFallback<GameDto | null>(
         "derived: featured matchup (/games/today)",
         async () => {
-          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
+          const [games, preds, players] = await Promise.all([
+            getGamesToday(),
+            getPredictionsToday(),
+            getPlayers(2000),
+          ]);
           const g = games[0];
           if (!g) return null;
-          const ranked = adaptPredictions(preds, games).find((r) => r.player_id) ?? null;
+          const ranked = adaptPredictions(preds, games, players).find((r) => r.player_id) ?? null;
           const batter: GameDto["batter"] = {
             ...(ranked ?? {
               rank: 0,

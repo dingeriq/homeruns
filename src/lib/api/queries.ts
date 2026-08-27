@@ -108,8 +108,12 @@ export const topCandidatesQuery = (limit = 25) =>
       withFallback<RankingDto[]>(
         "GET /predictions/today",
         async () => {
-          const [preds, games] = await Promise.all([getPredictionsToday(), getGamesToday()]);
-          return adaptPredictions(preds, games).slice(0, limit);
+          const [preds, games, players] = await Promise.all([
+            getPredictionsToday(),
+            getGamesToday(),
+            getPlayers(2000),
+          ]);
+          return adaptPredictions(preds, games, players).slice(0, limit);
         },
         () => [],
       ),
@@ -123,8 +127,12 @@ export const slateSummaryQuery = () =>
       withFallback<SlateSummaryDto>(
         "derived: slate summary (/games/today + /predictions/today)",
         async () => {
-          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
-          const rows = adaptPredictions(preds, games);
+          const [games, preds, players] = await Promise.all([
+            getGamesToday(),
+            getPredictionsToday(),
+            getPlayers(2000),
+          ]);
+          const rows = adaptPredictions(preds, games, players);
           const top = rows[0];
           const avg = rows.length ? rows.reduce((a, r) => a + r.confidence, 0) / rows.length : 0;
           return {
@@ -148,12 +156,12 @@ export const playerQuery = (playerId: string) =>
         `GET /players (lookup ${playerId})`,
         async () => {
           const [players, preds, games] = await Promise.all([
-            getPlayers(1000),
+            getPlayers(2000),
             getPredictionsToday(),
             getGamesToday(),
           ]);
           const p = players.find((x) => x.player_id === String(playerId));
-          const ranked = adaptPredictions(preds, games).find((r) => r.player_id === String(playerId));
+          const ranked = adaptPredictions(preds, games, players).find((r) => r.player_id === String(playerId));
           if (!p && !ranked) throw new Error(`Player ${playerId} not found in database`);
           const base: RankingDto = ranked ?? {
             rank: 0,
@@ -196,10 +204,14 @@ export const featuredMatchupQuery = () =>
       withFallback<GameDto | null>(
         "derived: featured matchup (/games/today)",
         async () => {
-          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
+          const [games, preds, players] = await Promise.all([
+            getGamesToday(),
+            getPredictionsToday(),
+            getPlayers(2000),
+          ]);
           const g = games[0];
           if (!g) return null;
-          const ranked = adaptPredictions(preds, games).find((r) => r.player_id) ?? null;
+          const ranked = adaptPredictions(preds, games, players).find((r) => r.player_id) ?? null;
           const batter: GameDto["batter"] = {
             ...(ranked ?? {
               rank: 0,

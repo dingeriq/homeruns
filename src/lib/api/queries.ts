@@ -127,8 +127,12 @@ export const slateSummaryQuery = () =>
       withFallback<SlateSummaryDto>(
         "derived: slate summary (/games/today + /predictions/today)",
         async () => {
-          const [games, preds] = await Promise.all([getGamesToday(), getPredictionsToday()]);
-          const rows = adaptPredictions(preds, games);
+          const [games, preds, players] = await Promise.all([
+            getGamesToday(),
+            getPredictionsToday(),
+            getPlayers(2000),
+          ]);
+          const rows = adaptPredictions(preds, games, players);
           const top = rows[0];
           const avg = rows.length ? rows.reduce((a, r) => a + r.confidence, 0) / rows.length : 0;
           return {

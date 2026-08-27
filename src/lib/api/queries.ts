@@ -108,8 +108,12 @@ export const topCandidatesQuery = (limit = 25) =>
       withFallback<RankingDto[]>(
         "GET /predictions/today",
         async () => {
-          const [preds, games] = await Promise.all([getPredictionsToday(), getGamesToday()]);
-          return adaptPredictions(preds, games).slice(0, limit);
+          const [preds, games, players] = await Promise.all([
+            getPredictionsToday(),
+            getGamesToday(),
+            getPlayers(2000),
+          ]);
+          return adaptPredictions(preds, games, players).slice(0, limit);
         },
         () => [],
       ),

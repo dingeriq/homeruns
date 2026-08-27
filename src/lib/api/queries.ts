@@ -156,12 +156,12 @@ export const playerQuery = (playerId: string) =>
         `GET /players (lookup ${playerId})`,
         async () => {
           const [players, preds, games] = await Promise.all([
-            getPlayers(1000),
+            getPlayers(2000),
             getPredictionsToday(),
             getGamesToday(),
           ]);
           const p = players.find((x) => x.player_id === String(playerId));
-          const ranked = adaptPredictions(preds, games).find((r) => r.player_id === String(playerId));
+          const ranked = adaptPredictions(preds, games, players).find((r) => r.player_id === String(playerId));
           if (!p && !ranked) throw new Error(`Player ${playerId} not found in database`);
           const base: RankingDto = ranked ?? {
             rank: 0,

@@ -207,20 +207,36 @@ export const predictionsTodayQuery = () =>
     staleTime: 60_000,
   });
 
-/** Map backend predictions + today's games into the ranking rows the UI renders. */
-export function adaptPredictions(preds: BackendPrediction[], games: GameSummary[]): RankingDto[] {
+/** Map backend predictions + today's games into the ranking rows the UI renders.
+ *  `players` (optional) resolves each batter's real team by player_id — the
+ *  prediction payload has no team field, so without it we can only fall back
+ *  to the game's home team. */
+export function adaptPredictions(
+  preds: BackendPrediction[],
+  games: GameSummary[],
+  players?: PlayerSummary[],
+): RankingDto[] {
   const byGame = new Map(games.map((g) => [g.game_id, g]));
+  const teamByPlayer = new Map((players ?? []).map((p) => [p.player_id, p.team]));
   return [...preds]
     .sort((a, b) => b.hr_probability - a.hr_probability)
     .map((p, i) => {
       const g = byGame.get(String(p.game_id));
+      const team = teamByPlayer.get(String(p.player_id)) ?? g?.home_team ?? "";
+      const isAway = !!g && team === g.away_team;
+      const opp = g ? (isAway ? g.home_team : g.away_team) : "";
+      const pitcher =
+        (isAway ? g?.home_probable_pitcher : g?.away_probable_pitcher) ??
+        g?.home_probable_pitcher ??
+        g?.away_probable_pitcher ??
+        "TBD";
       return {
         rank: i + 1,
         player_id: String(p.player_id),
         player: p.player_name,
-        team: g?.home_team ?? "",
-        opp: g?.away_team ?? "",
-        pitcher: g?.home_probable_pitcher ?? g?.away_probable_pitcher ?? "TBD",
+        team,
+        opp,
+        pitcher,
         park: g?.park ?? "",
         p_hr: p.hr_probability,
         confidence: p.confidence,
@@ -229,3 +245,4 @@ export function adaptPredictions(preds: BackendPrediction[], games: GameSummary[
       };
     });
 }
+

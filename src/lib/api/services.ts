@@ -199,8 +199,12 @@ export const predictionsTodayQuery = () =>
       withFallback<RankingDto[]>(
         "GET /predictions/today",
         async () => {
-          const [preds, games] = await Promise.all([getPredictionsToday(), getGamesToday()]);
-          return adaptPredictions(preds, games);
+          const [preds, games, players] = await Promise.all([
+            getPredictionsToday(),
+            getGamesToday(),
+            getPlayers(2000),
+          ]);
+          return adaptPredictions(preds, games, players);
         },
         () => mockTopCandidates(25),
       ),

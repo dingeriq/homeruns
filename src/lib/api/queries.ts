@@ -84,7 +84,9 @@ export type SlateSummaryDto = {
   top_prob: number;
   top_prob_player: string;
   avg_confidence: number;
+  slate_date?: string;
 };
+
 
 const emptyStats = {
   barrel_14: 0,

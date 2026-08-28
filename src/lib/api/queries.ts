@@ -84,7 +84,9 @@ export type SlateSummaryDto = {
   top_prob: number;
   top_prob_player: string;
   avg_confidence: number;
+  slate_date?: string;
 };
+
 
 const emptyStats = {
   barrel_14: 0,
@@ -135,18 +137,27 @@ export const slateSummaryQuery = () =>
           const rows = adaptPredictions(preds, games, players);
           const top = rows[0];
           const avg = rows.length ? rows.reduce((a, r) => a + r.confidence, 0) / rows.length : 0;
+          // Slate size must reflect the games the predictions actually belong to,
+          // not the (possibly out-of-sync) /games/today list.
+          const predGameIds = new Set(preds.map((p) => String(p.game_id)));
+          const gameCount = predGameIds.size || games.length;
+          // Backend "today" is a UTC date; use the slate's own date so the header
+          // never drifts to the browser's local calendar day.
+          const slateDate = (games[0]?.date || new Date().toISOString().slice(0, 10)) as string;
           return {
-            games: games.length,
+            games: gameCount,
             hitters_scored: rows.length,
             top_prob: top?.p_hr ?? 0,
             top_prob_player: top?.player ?? "—",
             avg_confidence: avg,
+            slate_date: slateDate,
           };
         },
         () => ({ games: 0, hitters_scored: 0, top_prob: 0, top_prob_player: "—", avg_confidence: 0 }),
       ),
     staleTime: 60_000,
   });
+
 
 export const playerQuery = (playerId: string) =>
   queryOptions({

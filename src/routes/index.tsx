@@ -23,7 +23,11 @@ function Rankings() {
   const top = rankings.slice(0, 10);
 
   return (
-    <DashboardShell title="Daily Home Run Rankings" subtitle="Top 25 candidates from today's slate">
+    <DashboardShell
+      title="Daily Home Run Rankings"
+      subtitle="Top 25 candidates from today's slate"
+      slateDate={summaryQ.data?.slate_date}
+    >
       {summaryQ.isError ? (
         <ErrorPanel error={summaryQ.error} onRetry={() => summaryQ.refetch()} />
       ) : (

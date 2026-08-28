@@ -14,7 +14,18 @@ const nav = [
   { to: "/features", label: "Feature Importance", icon: BarChart3 },
 ] as const;
 
-export function DashboardShell({ children, title, subtitle }: { children: ReactNode; title: string; subtitle?: string }) {
+export function DashboardShell({
+  children,
+  title,
+  subtitle,
+  slateDate,
+}: {
+  children: ReactNode;
+  title: string;
+  subtitle?: string;
+  /** ISO date (YYYY-MM-DD) of the slate being displayed; falls back to today's UTC date. */
+  slateDate?: string;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   return (
     <div className="min-h-screen bg-background flex">
@@ -60,12 +71,24 @@ export function DashboardShell({ children, title, subtitle }: { children: ReactN
           </div>
           <div className="flex items-center gap-3">
             <ClientOnly><EnvBadge /></ClientOnly>
-            <ClientOnly>
+            {slateDate ? (
               <span className="text-xs text-muted-foreground">
-                {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric" })}
+                {new Date(`${slateDate}T12:00:00Z`).toLocaleDateString("en-US", {
+                  weekday: "long",
+                  month: "short",
+                  day: "numeric",
+                  timeZone: "UTC",
+                })}
               </span>
-            </ClientOnly>
+            ) : (
+              <ClientOnly>
+                <span className="text-xs text-muted-foreground">
+                  {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}
+                </span>
+              </ClientOnly>
+            )}
           </div>
+
         </header>
         <main className="flex-1 p-6 space-y-6">
           <ClientOnly><DemoBanner /></ClientOnly>

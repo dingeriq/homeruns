@@ -54,6 +54,13 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
     data = await client.schedule(on)
     rows: List[Dict[str, Any]] = []
     for day in data.get("dates", []):
+        # Official MLB schedule (local) date for this slate — night games have a
+        # UTC first-pitch timestamp that falls on the following calendar day, so
+        # deriving game_date from the timestamp splits one slate across two dates.
+        try:
+            slate_date = date.fromisoformat(day.get("date", ""))
+        except Exception:
+            slate_date = None
         for g in day.get("games", []):
             home = g["teams"]["home"]
             away = g["teams"]["away"]
@@ -68,7 +75,7 @@ async def sync_games(client: MLBStatsClient, on: date | None = None) -> int:
             rows.append(
                 {
                     "game_id": g["gamePk"],
-                    "game_date": game_dt.date(),
+                    "game_date": slate_date or game_dt.date(),
                     "game_datetime": game_dt,
                     "home_team": home_team.get("abbreviation")
                     or home_team.get("teamCode")

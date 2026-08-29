@@ -141,9 +141,12 @@ export const slateSummaryQuery = () =>
           // not the (possibly out-of-sync) /games/today list.
           const predGameIds = new Set(preds.map((p) => String(p.game_id)));
           const gameCount = predGameIds.size || games.length;
-          // Backend "today" is a UTC date; use the slate's own date so the header
-          // never drifts to the browser's local calendar day.
-          const slateDate = (games[0]?.date || new Date().toISOString().slice(0, 10)) as string;
+          // Slate date comes from the games the predictions actually belong to
+          // (game_id intersection), not games[0] — /games/today can be a superset
+          // or momentarily stale relative to the scored slate. Never use the
+          // browser's local calendar date.
+          const slateGame = games.find((g) => predGameIds.has(g.game_id));
+          const slateDate = slateGame?.date ?? games[0]?.date ?? new Date().toISOString().slice(0, 10);
           return {
             games: gameCount,
             hitters_scored: rows.length,

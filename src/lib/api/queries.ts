@@ -140,13 +140,15 @@ export const slateSummaryQuery = () =>
           // Slate size must reflect the games the predictions actually belong to,
           // not the (possibly out-of-sync) /games/today list.
           const predGameIds = new Set(preds.map((p) => String(p.game_id)));
-          const gameCount = predGameIds.size || games.length;
           // Slate date comes from the games the predictions actually belong to
           // (game_id intersection), not games[0] — /games/today can be a superset
           // or momentarily stale relative to the scored slate. Never use the
           // browser's local calendar date.
           const slateGame = games.find((g) => predGameIds.has(g.game_id));
           const slateDate = slateGame?.date ?? games[0]?.date ?? new Date().toISOString().slice(0, 10);
+          // Slate size: games on the slate date, falling back to the distinct
+          // games the predictions reference if the games list is out of sync.
+          const gameCount = games.filter((g) => g.date === slateDate).length || predGameIds.size || games.length;
           return {
             games: gameCount,
             hitters_scored: rows.length,

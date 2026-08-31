@@ -178,3 +178,12 @@ def _ensure_columns() -> None:
                 )
     except Exception as exc:  # pragma: no cover - never block startup
         logger.warning("Column migration skipped: %s", exc)
+    try:
+        with get_engine().begin() as conn:
+            for name, table, columns in _INDEX_MIGRATIONS:
+                conn.execute(
+                    text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} {columns}")
+                )
+    except Exception as exc:  # pragma: no cover - never block startup
+        logger.warning("Index migration skipped: %s", exc)
+

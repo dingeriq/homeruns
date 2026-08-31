@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -22,6 +22,7 @@ from app.services.training_dataset import (
     load_training_rows,
 )
 from app.services.data_audit import run_audit
+from app.services.evaluation import performance, resolve_slate
 from app.services.db_usage import run_db_usage
 from app.services.lineups import sync_lineups
 from app.services.park_factors import compute_park_factors
@@ -326,3 +327,57 @@ async def get_model_status() -> dict:
         corpus = None
     return {"model": status, "corpus": corpus}
 
+
+
+@router.post("/resolve-results")
+async def resolve_results(
+    date_: Optional[date] = Query(
+        None, alias="date", description="Slate date to resolve (default: yesterday UTC)"
+    ),
+    model_version: Optional[str] = Query(
+        None, description="Restrict resolution to one model version"
+    ),
+) -> dict:
+    """Stamp realized HR outcomes onto stored predictions for one slate date.
+
+    Reads ``statcast_pitches`` only; performs no ingestion and never changes a
+    probability. Games without ingested Statcast rows stay unresolved (NULL).
+    """
+    day = date_ or (date.today() - timedelta(days=1))
+
+    def _run() -> dict:
+        with session_scope() as s:
+            return resolve_slate(s, day, model_version=model_version)
+
+    try:
+        with track_job("resolve_results"):
+            result = await asyncio.to_thread(_run)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"resolution failed: {type(exc).__name__}"
+        )
+    return {"status": result.get("status", "unknown"), "resolution": result}
+
+
+@router.get("/model-performance")
+async def get_model_performance(
+    start: Optional[date] = Query(None, description="First slate date (inclusive)"),
+    end: Optional[date] = Query(None, description="Last slate date (inclusive)"),
+    model_version: Optional[str] = Query(None, description="Filter to one model version"),
+) -> dict:
+    """Read-only realized performance over resolved predictions."""
+    end_day = end or date.today()
+    start_day = start or (end_day - timedelta(days=30))
+    if start_day > end_day:
+        raise HTTPException(status_code=400, detail="start must be on or before end")
+
+    def _run() -> dict:
+        with session_scope() as s:
+            return performance(s, start_day, end_day, model_version=model_version)
+
+    try:
+        return await asyncio.to_thread(_run)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503, detail=f"performance unavailable: {type(exc).__name__}"
+        )

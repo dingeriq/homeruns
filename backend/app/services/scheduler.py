@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.database.session import session_scope
+from app.services.evaluation import resolve_slate
 from app.monitoring import record_scheduler_status, record_synced_counts, track_job
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast

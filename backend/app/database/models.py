@@ -464,6 +464,16 @@ class DailyPrediction(Base):
     features_used: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     features_total: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     imputed_features: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+
+    # --- Post-game resolution (evaluation only; never read by scoring) ---
+    #: 1 when the batter homered in this game, 0 when the game's Statcast rows
+    #: are present and he did not, NULL while the outcome is still unknown.
+    actual_hr: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    resolution_source: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+
     created_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
@@ -477,4 +487,6 @@ class DailyPrediction(Base):
             name="uq_daily_prediction_key",
         ),
         Index("ix_daily_prediction_date_prob", "game_date", "hr_probability"),
+        Index("ix_daily_prediction_date_actual", "game_date", "actual_hr"),
     )
+

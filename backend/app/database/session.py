@@ -150,7 +150,22 @@ _COLUMN_MIGRATIONS = (
     ("games", "venue_id", "INTEGER"),
     ("players", "is_active", "BOOLEAN"),
     ("players", "last_seen_season", "SMALLINT"),
+    # Post-game evaluation fields — additive and nullable; existing rows keep
+    # their values and stay unresolved (NULL) until the resolver runs.
+    ("daily_predictions", "actual_hr", "SMALLINT"),
+    ("daily_predictions", "resolved_at", "TIMESTAMPTZ"),
+    ("daily_predictions", "resolution_source", "VARCHAR(32)"),
 )
+
+#: Additive, idempotent index migrations (create_all skips existing tables).
+_INDEX_MIGRATIONS = (
+    (
+        "ix_daily_prediction_date_actual",
+        "daily_predictions",
+        "(game_date, actual_hr)",
+    ),
+)
+
 
 
 
@@ -163,3 +178,12 @@ def _ensure_columns() -> None:
                 )
     except Exception as exc:  # pragma: no cover - never block startup
         logger.warning("Column migration skipped: %s", exc)
+    try:
+        with get_engine().begin() as conn:
+            for name, table, columns in _INDEX_MIGRATIONS:
+                conn.execute(
+                    text(f"CREATE INDEX IF NOT EXISTS {name} ON {table} {columns}")
+                )
+    except Exception as exc:  # pragma: no cover - never block startup
+        logger.warning("Index migration skipped: %s", exc)
+

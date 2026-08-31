@@ -3,11 +3,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import date, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from app.config import settings
+from app.database.session import session_scope
+from app.services.evaluation import resolve_slate
 from app.monitoring import record_scheduler_status, record_synced_counts, track_job
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast
@@ -33,6 +36,26 @@ async def _job() -> None:
         logger.exception("Daily refresh failed: %s", exc)
 
 
+async def _resolve_previous_slate() -> None:
+    """Stamp realized outcomes on yesterday's predictions.
+
+    Deliberately swallows every failure: evaluation is observational and must
+    never break the Statcast ingest or startup.
+    """
+    day = date.today() - timedelta(days=1)
+
+    def _run() -> dict:
+        with session_scope() as s:
+            return resolve_slate(s, day)
+
+    try:
+        with track_job("resolve_previous_slate"):
+            result = await asyncio.to_thread(_run)
+        logger.info("Prediction resolution complete: %s", result)
+    except Exception as exc:
+        logger.warning("Prediction resolution skipped (%s): %s", type(exc).__name__, exc)
+
+
 async def _statcast_job() -> None:
     logger.info("Daily Statcast ingest starting")
     try:
@@ -42,6 +65,10 @@ async def _statcast_job() -> None:
         logger.info("Statcast ingest complete: %s", result)
     except Exception as exc:
         logger.exception("Statcast ingest failed: %s", exc)
+    # Runs whether or not the ingest above succeeded, and cannot fail the job.
+    await _resolve_previous_slate()
+
+
 
 
 async def _park_factor_job() -> None:

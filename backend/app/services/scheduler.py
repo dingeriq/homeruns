@@ -14,6 +14,7 @@ from app.services.evaluation import resolve_slate
 from app.monitoring import record_scheduler_status, record_synced_counts, track_job
 from app.state import startup_state
 from app.services.statcast_service import sync_statcast
+from app.services.scoring import store_slate_predictions
 from app.services.sync import run_full_sync
 from app.services.park_factors import compute_park_factors
 from app.services.lineups import sync_lineups
@@ -68,6 +69,51 @@ async def _statcast_job() -> None:
     # Runs whether or not the ingest above succeeded, and cannot fail the job.
     await _resolve_previous_slate()
 
+
+
+async def _score_slate_job() -> None:
+    """Score the current official slate with the registered V1 model.
+
+    Uses the existing ``store_slate_predictions`` service, which is idempotent on
+    ``(game_date, game_id, player_id, model_version)`` — repeated runs update the
+    stored rows in place. Never trains, never ingests, and never raises: a
+    missing slate, missing lineups or missing model artifact is logged as a skip
+    so the scheduler keeps running.
+    """
+    day = date.today()
+
+    def _run() -> dict:
+        with session_scope() as s:
+            return store_slate_predictions(s, day)
+
+    try:
+        with track_job("daily_slate_scoring"):
+            result = await asyncio.to_thread(_run)
+    except Exception as exc:
+        logger.exception("Slate scoring failed for %s: %s", day, exc)
+        return
+
+    status = result.get("status")
+    if status != "ok":
+        logger.info(
+            "Slate scoring skipped for %s (%s): %s",
+            day,
+            status,
+            result.get("reason"),
+        )
+        return
+
+    record_synced_counts({"daily_predictions": result.get("predictions_scored", 0)})
+    logger.info(
+        "Slate scoring complete for %s: %s hitters across %s games "
+        "(inserted=%s, updated=%s, model=%s)",
+        day,
+        result.get("predictions_scored", 0),
+        result.get("games_scored", result.get("games")),
+        result.get("inserted", 0),
+        result.get("updated", 0),
+        result.get("model_version"),
+    )
 
 
 
@@ -165,6 +211,13 @@ def start_scheduler() -> None:
         _lineup_job,
         CronTrigger(minute="5,35"),
         id="lineup-refresh",
+        max_instances=1,
+        coalesce=True,
+    )
+    sched.add_job(
+        _score_slate_job,
+        CronTrigger(minute=settings.score_slate_minute),
+        id="daily-slate-scoring",
         max_instances=1,
         coalesce=True,
     )

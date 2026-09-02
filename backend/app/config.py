@@ -181,6 +181,11 @@ class Settings:
     statcast_refresh_minute: int = field(
         default_factory=lambda: int(os.getenv("STATCAST_REFRESH_MINUTE", "30"))
     )
+    # Automated slate scoring cadence. Runs hourly at this minute, after the
+    # lineup refresh (:05/:35) so freshly posted batting orders are scored.
+    score_slate_minute: int = field(
+        default_factory=lambda: int(os.getenv("SCORE_SLATE_MINUTE", "45"))
+    )
     daily_refresh_hour: int = field(default_factory=lambda: int(os.getenv("DAILY_REFRESH_HOUR", "8")))
     daily_refresh_minute: int = field(
         default_factory=lambda: int(os.getenv("DAILY_REFRESH_MINUTE", "0"))

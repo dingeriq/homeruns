@@ -212,6 +212,7 @@ def store_slate_predictions(
             "game_date": str(day),
             "model_version": result.get("model_version"),
             "predictions_scored": 0,
+            "games_scored": 0,
             "inserted": 0,
             "updated": 0,
         }
@@ -264,6 +265,7 @@ def store_slate_predictions(
         "game_date": str(day),
         "model_version": result.get("model_version"),
         "predictions_scored": len(result["predictions"]),
+        "games_scored": len({p["game_id"] for p in result["predictions"]}),
         "inserted": inserted,
         "updated": updated,
     }

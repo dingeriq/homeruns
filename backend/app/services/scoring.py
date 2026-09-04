@@ -172,6 +172,8 @@ def score_slate(
         "model_version": artifact.get("model_version"),
         "game_date": str(day),
         "predictions": predictions,
+        "games_confirmed": len(confirmed_games),
+        "games_awaiting_confirmed_lineups": awaiting,
     }
 
 

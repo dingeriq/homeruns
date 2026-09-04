@@ -433,6 +433,8 @@ def lineup_slot_for_player(session, player_id: int, game_id: int) -> Optional[Di
 
 __all__ = [
     "sync_lineups",
+    "confirmed_game_ids",
+    "game_lineup_confirmation",
     "lineups_for_game",
     "lineups_for_date",
     "lineup_slot_for_player",

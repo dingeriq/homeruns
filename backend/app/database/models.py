@@ -464,6 +464,10 @@ class DailyPrediction(Base):
     features_used: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     features_total: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
     imputed_features: Mapped[Optional[dict]] = mapped_column(JSONVariant, nullable=True)
+    #: Lineup provenance of this prediction. Final predictions are written only
+    #: from official MLB-confirmed starting lineups ('confirmed'); legacy rows
+    #: written before that gate existed stay NULL.
+    lineup_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
 
     # --- Post-game resolution (evaluation only; never read by scoring) ---
     #: 1 when the batter homered in this game, 0 when the game's Statcast rows

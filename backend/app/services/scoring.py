@@ -323,15 +323,23 @@ def store_slate_predictions(
                 setattr(row, key, value)
             updated += 1
     session.flush()
+    written = inserted + updated
     return {
-        "status": "ok",
-        "reason": None,
+        "status": "ok" if written else "unavailable",
+        "reason": None
+        if written
+        else "all_games_locked: every confirmed game has passed first pitch; existing pregame predictions are final.",
         "game_date": str(day),
         "model_version": result.get("model_version"),
-        "predictions_scored": len(result["predictions"]),
-        "games_scored": len({p["game_id"] for p in result["predictions"]}),
+        "predictions_scored": written,
+        "games_scored": len(
+            {p["game_id"] for p in result["predictions"] if p["game_id"] not in locked_games}
+        ),
         "inserted": inserted,
         "updated": updated,
+        "locked_predictions_skipped": skipped_locked,
+        "locked_games": locked_games,
+        "games_awaiting_confirmed_lineups": result.get("games_awaiting_confirmed_lineups", []),
     }
 
 

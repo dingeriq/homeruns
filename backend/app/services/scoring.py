@@ -18,19 +18,45 @@ from sqlalchemy.orm import Session
 from app.database import models
 from app.services.feature_builder import FEATURE_SET_VERSION, build_features
 from app.services.hr_model import load_artifact, predict
+from app.services.lineups import CONFIRMED, game_lineup_confirmation
 
 logger = logging.getLogger("dingeriq.scoring")
 
 
 def _lineup_rows(session: Session, day: date) -> List[models.GameLineup]:
+    """Official confirmed starters only.
+
+    Projected lineups are deliberately excluded: a projected hitter is not an
+    official starter and must never receive a final prediction.
+    """
     L = models.GameLineup
     return list(
         session.execute(
             select(L)
-            .where(L.game_date == day, L.is_starter.is_(True))
+            .where(L.game_date == day, L.is_starter.is_(True), L.status == CONFIRMED)
             .order_by(L.game_id, L.side, L.batting_order)
         ).scalars()
     )
+
+
+def first_pitch_passed(game: Optional[models.Game], now=None) -> bool:
+    """True when the game's timezone-aware scheduled first pitch is in the past.
+
+    Uses the backend's stored schedule timestamp only — never a client clock or
+    a local calendar date. An unknown first pitch is treated as *not* started so
+    a missing timestamp can never silently discard a pregame prediction.
+    """
+    from datetime import datetime, timezone
+
+    dt = getattr(game, "game_datetime", None)
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now >= dt
 
 
 def _game_context(session: Session, game_id: int) -> Optional[models.Game]:

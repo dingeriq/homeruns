@@ -258,17 +258,37 @@ def store_slate_predictions(
             "games_scored": 0,
             "inserted": 0,
             "updated": 0,
+            "locked_games": [],
+            "games_awaiting_confirmed_lineups": result.get(
+                "games_awaiting_confirmed_lineups", []
+            ),
         }
 
     D = models.DailyPrediction
     now = datetime.now(timezone.utc)
-    inserted = updated = 0
+    inserted = updated = skipped_locked = 0
+    locked_games: List[int] = []
+    started: Dict[int, bool] = {}
     for p in result["predictions"]:
+        game_id = p["game_id"]
+        # Prediction locking is per game_id, so doubleheaders lock independently.
+        if game_id not in started:
+            started[game_id] = first_pitch_passed(_game_context(session, game_id), now)
+        if started[game_id]:
+            if game_id not in locked_games:
+                locked_games.append(game_id)
+                logger.info(
+                    "Game %s has passed first pitch — final pregame predictions are locked; "
+                    "no rows written or overwritten.",
+                    game_id,
+                )
+            skipped_locked += 1
+            continue
         version = p["model_version"]
         row = session.execute(
             _select(D).where(
                 D.game_date == day,
-                D.game_id == p["game_id"],
+                D.game_id == game_id,
                 D.player_id == p["player_id"],
                 D.model_version == version,
             )
@@ -283,6 +303,7 @@ def store_slate_predictions(
             "features_used": p.get("features_used"),
             "features_total": p.get("features_total"),
             "imputed_features": p.get("imputed_features"),
+            "lineup_status": CONFIRMED,
             "updated_at": now,
         }
         if row is None:

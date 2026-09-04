@@ -93,17 +93,32 @@ def score_slate(
             "predictions": [],
         }
 
-    rows = _lineup_rows(session, day)
+    confirmation = game_lineup_confirmation(session, day)
+    confirmed_games = {gid for gid, info in confirmation.items() if info["is_confirmed"]}
+    awaiting = [
+        {"game_id": gid, "reason": info["reason"], "confirmed_sides": info["confirmed_sides"]}
+        for gid, info in sorted(confirmation.items())
+        if not info["is_confirmed"]
+    ]
+    for entry in awaiting:
+        logger.info(
+            "Skipping game %s for %s: %s", entry["game_id"], day, entry["reason"]
+        )
+
+    rows = [r for r in _lineup_rows(session, day) if r.game_id in confirmed_games]
     if not rows:
         return {
             "status": "unavailable",
             "reason": (
-                "no_lineups: no confirmed or projected lineups are stored for this date. "
-                "Run POST /admin/lineups-sync once MLB posts batting orders."
+                "no_confirmed_lineups: no game on this slate has official MLB starting "
+                "lineups posted for both teams yet. Projected lineups are never scored "
+                "as final predictions."
             ),
             "model_version": artifact.get("model_version"),
             "game_date": str(day),
             "predictions": [],
+            "games_confirmed": 0,
+            "games_awaiting_confirmed_lineups": awaiting,
         }
 
     games: Dict[int, Optional[models.Game]] = {}

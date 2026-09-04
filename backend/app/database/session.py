@@ -155,6 +155,8 @@ _COLUMN_MIGRATIONS = (
     ("daily_predictions", "actual_hr", "SMALLINT"),
     ("daily_predictions", "resolved_at", "TIMESTAMPTZ"),
     ("daily_predictions", "resolution_source", "VARCHAR(32)"),
+    # Lineup provenance of a stored prediction ('confirmed'); NULL on legacy rows.
+    ("daily_predictions", "lineup_status", "VARCHAR(16)"),
 )
 
 #: Additive, idempotent index migrations (create_all skips existing tables).

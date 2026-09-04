@@ -18,19 +18,45 @@ from sqlalchemy.orm import Session
 from app.database import models
 from app.services.feature_builder import FEATURE_SET_VERSION, build_features
 from app.services.hr_model import load_artifact, predict
+from app.services.lineups import CONFIRMED, game_lineup_confirmation
 
 logger = logging.getLogger("dingeriq.scoring")
 
 
 def _lineup_rows(session: Session, day: date) -> List[models.GameLineup]:
+    """Official confirmed starters only.
+
+    Projected lineups are deliberately excluded: a projected hitter is not an
+    official starter and must never receive a final prediction.
+    """
     L = models.GameLineup
     return list(
         session.execute(
             select(L)
-            .where(L.game_date == day, L.is_starter.is_(True))
+            .where(L.game_date == day, L.is_starter.is_(True), L.status == CONFIRMED)
             .order_by(L.game_id, L.side, L.batting_order)
         ).scalars()
     )
+
+
+def first_pitch_passed(game: Optional[models.Game], now=None) -> bool:
+    """True when the game's timezone-aware scheduled first pitch is in the past.
+
+    Uses the backend's stored schedule timestamp only — never a client clock or
+    a local calendar date. An unknown first pitch is treated as *not* started so
+    a missing timestamp can never silently discard a pregame prediction.
+    """
+    from datetime import datetime, timezone
+
+    dt = getattr(game, "game_datetime", None)
+    if dt is None:
+        return False
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    return now >= dt
 
 
 def _game_context(session: Session, game_id: int) -> Optional[models.Game]:
@@ -67,17 +93,32 @@ def score_slate(
             "predictions": [],
         }
 
-    rows = _lineup_rows(session, day)
+    confirmation = game_lineup_confirmation(session, day)
+    confirmed_games = {gid for gid, info in confirmation.items() if info["is_confirmed"]}
+    awaiting = [
+        {"game_id": gid, "reason": info["reason"], "confirmed_sides": info["confirmed_sides"]}
+        for gid, info in sorted(confirmation.items())
+        if not info["is_confirmed"]
+    ]
+    for entry in awaiting:
+        logger.info(
+            "Skipping game %s for %s: %s", entry["game_id"], day, entry["reason"]
+        )
+
+    rows = [r for r in _lineup_rows(session, day) if r.game_id in confirmed_games]
     if not rows:
         return {
             "status": "unavailable",
             "reason": (
-                "no_lineups: no confirmed or projected lineups are stored for this date. "
-                "Run POST /admin/lineups-sync once MLB posts batting orders."
+                "no_confirmed_lineups: no game on this slate has official MLB starting "
+                "lineups posted for both teams yet. Projected lineups are never scored "
+                "as final predictions."
             ),
             "model_version": artifact.get("model_version"),
             "game_date": str(day),
             "predictions": [],
+            "games_confirmed": 0,
+            "games_awaiting_confirmed_lineups": awaiting,
         }
 
     games: Dict[int, Optional[models.Game]] = {}
@@ -131,6 +172,8 @@ def score_slate(
         "model_version": artifact.get("model_version"),
         "game_date": str(day),
         "predictions": predictions,
+        "games_confirmed": len(confirmed_games),
+        "games_awaiting_confirmed_lineups": awaiting,
     }
 
 
@@ -215,17 +258,37 @@ def store_slate_predictions(
             "games_scored": 0,
             "inserted": 0,
             "updated": 0,
+            "locked_games": [],
+            "games_awaiting_confirmed_lineups": result.get(
+                "games_awaiting_confirmed_lineups", []
+            ),
         }
 
     D = models.DailyPrediction
     now = datetime.now(timezone.utc)
-    inserted = updated = 0
+    inserted = updated = skipped_locked = 0
+    locked_games: List[int] = []
+    started: Dict[int, bool] = {}
     for p in result["predictions"]:
+        game_id = p["game_id"]
+        # Prediction locking is per game_id, so doubleheaders lock independently.
+        if game_id not in started:
+            started[game_id] = first_pitch_passed(_game_context(session, game_id), now)
+        if started[game_id]:
+            if game_id not in locked_games:
+                locked_games.append(game_id)
+                logger.info(
+                    "Game %s has passed first pitch — final pregame predictions are locked; "
+                    "no rows written or overwritten.",
+                    game_id,
+                )
+            skipped_locked += 1
+            continue
         version = p["model_version"]
         row = session.execute(
             _select(D).where(
                 D.game_date == day,
-                D.game_id == p["game_id"],
+                D.game_id == game_id,
                 D.player_id == p["player_id"],
                 D.model_version == version,
             )
@@ -240,6 +303,7 @@ def store_slate_predictions(
             "features_used": p.get("features_used"),
             "features_total": p.get("features_total"),
             "imputed_features": p.get("imputed_features"),
+            "lineup_status": CONFIRMED,
             "updated_at": now,
         }
         if row is None:
@@ -259,15 +323,23 @@ def store_slate_predictions(
                 setattr(row, key, value)
             updated += 1
     session.flush()
+    written = inserted + updated
     return {
-        "status": "ok",
-        "reason": None,
+        "status": "ok" if written else "unavailable",
+        "reason": None
+        if written
+        else "all_games_locked: every confirmed game has passed first pitch; existing pregame predictions are final.",
         "game_date": str(day),
         "model_version": result.get("model_version"),
-        "predictions_scored": len(result["predictions"]),
-        "games_scored": len({p["game_id"] for p in result["predictions"]}),
+        "predictions_scored": written,
+        "games_scored": len(
+            {p["game_id"] for p in result["predictions"] if p["game_id"] not in locked_games}
+        ),
         "inserted": inserted,
         "updated": updated,
+        "locked_predictions_skipped": skipped_locked,
+        "locked_games": locked_games,
+        "games_awaiting_confirmed_lineups": result.get("games_awaiting_confirmed_lineups", []),
     }
 
 

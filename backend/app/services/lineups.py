@@ -359,6 +359,66 @@ def lineups_for_date(day: Optional[date] = None) -> List[Dict[str, Any]]:
         return [_serialise(r, pa) for r in rows]
 
 
+def game_lineup_confirmation(session, day: date) -> Dict[int, Dict[str, Any]]:
+    """Per-game official-lineup confirmation status for a slate date.
+
+    A game is ``confirmed`` only when **both** sides have at least one MLB-posted
+    (``status == 'confirmed'``) starter stored. Anything else — projected rows,
+    one side posted, or no rows at all — is *not* an official lineup and is
+    reported as ``awaiting``. Confirmation is read from stored MLB Stats API
+    data only; it is never inferred.
+    """
+    L = models.GameLineup
+    rows = session.execute(
+        select(L.game_id, L.side, L.status, func.count(L.id))
+        .where(L.game_date == day, L.is_starter.is_(True))
+        .group_by(L.game_id, L.side, L.status)
+    ).all()
+
+    out: Dict[int, Dict[str, Any]] = {}
+    for game_id, side, status, count in rows:
+        entry = out.setdefault(
+            int(game_id),
+            {"game_id": int(game_id), "confirmed_sides": [], "projected_sides": [], "starters_confirmed": 0},
+        )
+        if status == CONFIRMED and count:
+            if side not in entry["confirmed_sides"]:
+                entry["confirmed_sides"].append(side)
+            entry["starters_confirmed"] += int(count)
+        elif status == PROJECTED and count and side not in entry["projected_sides"]:
+            entry["projected_sides"].append(side)
+
+    # Scheduled games with no stored lineup rows at all still belong in the report.
+    for (game_id,) in session.execute(
+        select(models.Game.game_id).where(models.Game.game_date == day)
+    ).all():
+        out.setdefault(
+            int(game_id),
+            {"game_id": int(game_id), "confirmed_sides": [], "projected_sides": [], "starters_confirmed": 0},
+        )
+
+    for entry in out.values():
+        confirmed = len(entry["confirmed_sides"]) == 2
+        entry["lineup_status"] = CONFIRMED if confirmed else "awaiting_confirmed_lineup"
+        entry["is_confirmed"] = confirmed
+        entry["reason"] = (
+            None
+            if confirmed
+            else (
+                "awaiting_confirmed_lineup: MLB has not posted official starting "
+                f"lineups for both teams (confirmed sides: {entry['confirmed_sides'] or 'none'})."
+            )
+        )
+    return out
+
+
+def confirmed_game_ids(session, day: date) -> set[int]:
+    """Game ids whose official MLB starting lineups are confirmed for both sides."""
+    return {
+        gid for gid, info in game_lineup_confirmation(session, day).items() if info["is_confirmed"]
+    }
+
+
 def lineup_slot_for_player(session, player_id: int, game_id: int) -> Optional[Dict[str, Any]]:
     row = session.execute(
         select(models.GameLineup).where(
@@ -373,6 +433,8 @@ def lineup_slot_for_player(session, player_id: int, game_id: int) -> Optional[Di
 
 __all__ = [
     "sync_lineups",
+    "confirmed_game_ids",
+    "game_lineup_confirmation",
     "lineups_for_game",
     "lineups_for_date",
     "lineup_slot_for_player",

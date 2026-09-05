@@ -49,6 +49,31 @@ async def expected_pa() -> Dict[str, Any]:
     }
 
 
+@router.get("/confirmation")
+async def lineup_confirmation(
+    on: Optional[date] = Query(None, description="Slate date (default: today)"),
+) -> Dict[str, Any]:
+    """Per-game official-lineup confirmation for a slate.
+
+    A game counts as confirmed only when MLB has posted starting lineups for
+    both teams. Final HR predictions are generated for confirmed games only.
+    """
+
+    def _read() -> Dict[int, Dict[str, Any]]:
+        with session_scope() as s:
+            return game_lineup_confirmation(s, on or date.today())
+
+    info = await asyncio.to_thread(_read)
+    games = [info[k] for k in sorted(info)]
+    return {
+        "date": (on or date.today()).isoformat(),
+        "games": games,
+        "games_total": len(games),
+        "games_confirmed": sum(1 for g in games if g["is_confirmed"]),
+        "games_awaiting": [g["game_id"] for g in games if not g["is_confirmed"]],
+    }
+
+
 @router.get("/game/{game_id}")
 async def lineup_for_game(game_id: int = Path(..., ge=1)) -> Dict[str, Any]:
     rows = await asyncio.to_thread(lineups_for_game, game_id)

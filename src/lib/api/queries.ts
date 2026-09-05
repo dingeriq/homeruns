@@ -122,6 +122,13 @@ export const topCandidatesQuery = (limit = 25) =>
     staleTime: 60_000,
   });
 
+export const lineupConfirmationQuery = () =>
+  queryOptions({
+    queryKey: ["lineups", "confirmation"],
+    queryFn: () => getLineupConfirmation(),
+    staleTime: 60_000,
+  });
+
 export const slateSummaryQuery = () =>
   queryOptions({
     queryKey: ["predictions", "slate-summary"],

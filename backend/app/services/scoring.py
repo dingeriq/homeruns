@@ -394,6 +394,7 @@ def stored_predictions(
                 "features_total": r.features_total,
                 "imputed_features": r.imputed_features,
                 "lineup_slot": r.lineup_slot,
+                "lineup_status": r.lineup_status,
                 "team": r.team_abbreviation,
             }
             for r in rows

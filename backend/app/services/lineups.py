@@ -371,7 +371,7 @@ def game_lineup_confirmation(session, day: date) -> Dict[int, Dict[str, Any]]:
     L = models.GameLineup
     rows = session.execute(
         select(L.game_id, L.side, L.status, func.count(L.id))
-        .where(L.game_date == day, L.is_starter.is_(True))
+        .where(L.game_date == day)
         .group_by(L.game_id, L.side, L.status)
     ).all()
 

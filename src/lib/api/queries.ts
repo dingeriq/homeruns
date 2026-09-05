@@ -9,6 +9,7 @@ import { logApi } from "./log";
 import {
   adaptPredictions,
   getGamesToday,
+  getLineupConfirmation,
   getPlayers,
   getPredictionsToday,
 } from "./services";

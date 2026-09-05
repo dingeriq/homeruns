@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardShell, StatCard } from "@/components/dashboard-shell";
 import { ErrorPanel, LoadingPanel, SkeletonCard, SkeletonRow } from "@/components/query-states";
-import { slateSummaryQuery, topCandidatesQuery } from "@/lib/api/queries";
+import { lineupConfirmationQuery, slateSummaryQuery, topCandidatesQuery } from "@/lib/api/queries";
 import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip, Cell } from "recharts";
 
 export const Route = createFileRoute("/")({
@@ -18,6 +18,8 @@ export const Route = createFileRoute("/")({
 function Rankings() {
   const rankingsQ = useQuery(topCandidatesQuery(25));
   const summaryQ = useQuery(slateSummaryQuery());
+  const lineupQ = useQuery(lineupConfirmationQuery());
+  const awaiting = lineupQ.data?.games_awaiting?.length ?? 0;
 
   const rankings = rankingsQ.data ?? [];
   const top = rankings.slice(0, 10);
@@ -41,6 +43,16 @@ function Rankings() {
             tone="positive"
           />
           <StatCard label="Avg confidence" value={summaryQ.isLoading ? "…" : (summaryQ.data?.avg_confidence ?? 0).toFixed(2)} />
+        </div>
+      )}
+
+      {awaiting > 0 && (
+        <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm">
+          <span className="font-medium">Awaiting confirmed lineup</span>{" "}
+          <span className="text-muted-foreground">
+            — {awaiting} of {lineupQ.data?.games_total ?? 0} games have not had official starting
+            lineups posted yet. Final picks appear for those games once lineups are confirmed.
+          </span>
         </div>
       )}
 

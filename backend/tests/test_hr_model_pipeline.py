@@ -134,6 +134,23 @@ def _lineup(session, player_id: int, game_id: int = 700001):
             is_starter=True,
         )
     )
+    # The opposing side is posted too, so the game counts as officially confirmed.
+    if not session.query(models.GameLineup).filter(
+        models.GameLineup.game_id == game_id,
+        models.GameLineup.side == "away",
+    ).first():
+        session.add(
+            models.GameLineup(
+                game_id=game_id,
+                game_date=DAY,
+                side="away",
+                player_id=game_id,
+                player_name="Opposing starter",
+                team_abbreviation="BOS",
+                is_starter=False,
+                status="confirmed",
+            )
+        )
     session.flush()
 
 
@@ -149,7 +166,7 @@ def test_score_slate_no_lineup_is_unavailable(session, artifact_file):
     hr_model.save_artifact(hr_model.train_model(synthetic_rows(), min_rows=200))
     result = score_slate(session, DAY)
     assert result["status"] == "unavailable"
-    assert result["reason"].startswith("no_lineups")
+    assert result["reason"].startswith("no_confirmed_lineups")
     assert result["predictions"] == []
 
 

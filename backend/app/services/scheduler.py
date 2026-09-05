@@ -93,6 +93,18 @@ async def _score_slate_job() -> None:
         logger.exception("Slate scoring failed for %s: %s", day, exc)
         return
 
+    for awaiting in result.get("games_awaiting_confirmed_lineups", []) or []:
+        logger.info(
+            "Slate scoring: game %s not scored — %s",
+            awaiting.get("game_id"),
+            awaiting.get("reason"),
+        )
+    for game_id in result.get("locked_games", []) or []:
+        logger.info(
+            "Slate scoring: game %s locked (first pitch passed) — predictions unchanged.",
+            game_id,
+        )
+
     status = result.get("status")
     if status != "ok":
         logger.info(

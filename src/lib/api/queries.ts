@@ -9,6 +9,7 @@ import { logApi } from "./log";
 import {
   adaptPredictions,
   getGamesToday,
+  getLineupConfirmation,
   getPlayers,
   getPredictionsToday,
 } from "./services";
@@ -119,6 +120,13 @@ export const topCandidatesQuery = (limit = 25) =>
         },
         () => [],
       ),
+    staleTime: 60_000,
+  });
+
+export const lineupConfirmationQuery = () =>
+  queryOptions({
+    queryKey: ["lineups", "confirmation"],
+    queryFn: () => getLineupConfirmation(),
     staleTime: 60_000,
   });
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Path, Query
 
 from app.services.lineups import (
     expected_pa_by_slot,
+    game_lineup_confirmation,
     lineups_for_date,
     lineups_for_game,
 )
@@ -45,6 +46,31 @@ async def expected_pa() -> Dict[str, Any]:
     return {
         "method": "mean distinct Statcast at-bats per stored confirmed lineup slot",
         "slots": {str(k): v for k, v in slots.items()},
+    }
+
+
+@router.get("/confirmation")
+async def lineup_confirmation(
+    on: Optional[date] = Query(None, description="Slate date (default: today)"),
+) -> Dict[str, Any]:
+    """Per-game official-lineup confirmation for a slate.
+
+    A game counts as confirmed only when MLB has posted starting lineups for
+    both teams. Final HR predictions are generated for confirmed games only.
+    """
+
+    def _read() -> Dict[int, Dict[str, Any]]:
+        with session_scope() as s:
+            return game_lineup_confirmation(s, on or date.today())
+
+    info = await asyncio.to_thread(_read)
+    games = [info[k] for k in sorted(info)]
+    return {
+        "date": (on or date.today()).isoformat(),
+        "games": games,
+        "games_total": len(games),
+        "games_confirmed": sum(1 for g in games if g["is_confirmed"]),
+        "games_awaiting": [g["game_id"] for g in games if not g["is_confirmed"]],
     }
 
 

@@ -73,6 +73,23 @@ def _lineup(session, player_id: int, game_id: int = 900001):
             is_starter=True,
         )
     )
+    # The opposing side is posted too, so the game counts as officially confirmed.
+    if not session.query(models.GameLineup).filter(
+        models.GameLineup.game_id == game_id,
+        models.GameLineup.side == "away",
+    ).first():
+        session.add(
+            models.GameLineup(
+                game_id=game_id,
+                game_date=DAY,
+                side="away",
+                player_id=game_id,
+                player_name="Opposing starter",
+                team_abbreviation="BOS",
+                is_starter=False,
+                status="confirmed",
+            )
+        )
     session.flush()
 
 

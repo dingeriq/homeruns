@@ -137,6 +137,26 @@ export async function getGamesToday(): Promise<GameSummary[]> {
   return rows;
 }
 
+export interface LineupConfirmationDto {
+  date: string;
+  games: Array<{
+    game_id: number;
+    is_confirmed: boolean;
+    lineup_status: string;
+    confirmed_sides: string[];
+    reason: string | null;
+  }>;
+  games_total: number;
+  games_confirmed: number;
+  games_awaiting: number[];
+}
+
+export async function getLineupConfirmation(): Promise<LineupConfirmationDto> {
+  const dto = await apiFetch<LineupConfirmationDto>("/lineups/confirmation");
+  logApi("GET /lineups/confirmation", dto.games?.length ?? 0, "postgres");
+  return dto;
+}
+
 export async function getPlayers(limit = 500): Promise<PlayerSummary[]> {
   const raw = await apiFetch<BackendPlayer[]>(`/players?limit=${limit}`);
   const rows = raw.map(adaptPlayer);

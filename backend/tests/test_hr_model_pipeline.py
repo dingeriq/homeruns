@@ -166,7 +166,7 @@ def test_score_slate_no_lineup_is_unavailable(session, artifact_file):
     hr_model.save_artifact(hr_model.train_model(synthetic_rows(), min_rows=200))
     result = score_slate(session, DAY)
     assert result["status"] == "unavailable"
-    assert result["reason"].startswith("no_lineups")
+    assert result["reason"].startswith("no_confirmed_lineups")
     assert result["predictions"] == []
 
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Path, Query
 
 from app.services.lineups import (
     expected_pa_by_slot,
+    game_lineup_confirmation,
     lineups_for_date,
     lineups_for_game,
 )

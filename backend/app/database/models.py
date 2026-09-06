@@ -468,6 +468,11 @@ class DailyPrediction(Base):
     #: from official MLB-confirmed starting lineups ('confirmed'); legacy rows
     #: written before that gate existed stay NULL.
     lineup_status: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    #: Scheduled first pitch (UTC) this pregame prediction was locked against.
+    #: Legacy rows written before first-pitch locking existed stay NULL.
+    first_pitch_utc: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     # --- Post-game resolution (evaluation only; never read by scoring) ---
     #: 1 when the batter homered in this game, 0 when the game's Statcast rows

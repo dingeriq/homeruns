@@ -14,6 +14,7 @@ from app.services.lineups import (
     lineups_for_game,
 )
 from app.database.session import session_scope
+from app.services.timeutils import slate_today
 
 router = APIRouter(prefix="/lineups", tags=["lineups"])
 
@@ -24,7 +25,7 @@ async def lineups_today(
 ) -> Dict[str, Any]:
     rows: List[Dict[str, Any]] = await asyncio.to_thread(lineups_for_date, on)
     return {
-        "date": (on or date.today()).isoformat(),
+        "date": (on or slate_today()).isoformat(),
         "count": len(rows),
         "confirmed": sum(1 for r in rows if r["status"] == "confirmed"),
         "projected": sum(1 for r in rows if r["status"] == "projected"),
@@ -61,12 +62,12 @@ async def lineup_confirmation(
 
     def _read() -> Dict[int, Dict[str, Any]]:
         with session_scope() as s:
-            return game_lineup_confirmation(s, on or date.today())
+            return game_lineup_confirmation(s, on or slate_today())
 
     info = await asyncio.to_thread(_read)
     games = [info[k] for k in sorted(info)]
     return {
-        "date": (on or date.today()).isoformat(),
+        "date": (on or slate_today()).isoformat(),
         "games": games,
         "games_total": len(games),
         "games_confirmed": sum(1 for g in games if g["is_confirmed"]),

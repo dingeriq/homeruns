@@ -1,4 +1,5 @@
 import { Link, useRouterState } from "@tanstack/react-router";
+import { formatSlateDate, localToday, relativeDayLabel } from "@/lib/time";
 import { BarChart3, Home, LineChart, Search, TrendingUp, Trophy, User } from "lucide-react";
 import type { ReactNode } from "react";
 import { cn } from "@/lib/utils";
@@ -73,17 +74,13 @@ export function DashboardShell({
             <ClientOnly><EnvBadge /></ClientOnly>
             {slateDate ? (
               <span className="text-xs text-muted-foreground">
-                {new Date(`${slateDate}T12:00:00Z`).toLocaleDateString("en-US", {
-                  weekday: "long",
-                  month: "short",
-                  day: "numeric",
-                  timeZone: "UTC",
-                })}
+                {formatSlateDate(slateDate)}
+                {relativeDayLabel(slateDate) ? ` · ${relativeDayLabel(slateDate)}` : ""}
               </span>
             ) : (
               <ClientOnly>
                 <span className="text-xs text-muted-foreground">
-                  {new Date().toLocaleDateString("en-US", { weekday: "long", month: "short", day: "numeric", timeZone: "UTC" })}
+                  {formatSlateDate(localToday())}
                 </span>
               </ClientOnly>
             )}

@@ -244,7 +244,7 @@ def _store(session, game_id: int, rows: List[Dict[str, Any]], side: str) -> int:
 
 async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None = None) -> Dict[str, Any]:
     """Ingest confirmed lineups for a slate, projecting where MLB has none yet."""
-    day = on or date.today()
+    day = on or slate_today()
     client = client or MLBStatsClient()
     payload = await client.schedule(day)
 
@@ -344,7 +344,7 @@ def lineups_for_game(game_id: int) -> List[Dict[str, Any]]:
 
 
 def lineups_for_date(day: Optional[date] = None) -> List[Dict[str, Any]]:
-    day = day or date.today()
+    day = day or slate_today()
     with session_scope() as s:
         pa = expected_pa_by_slot(s)
         rows = s.execute(

@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { formatGameTime } from "@/lib/time";
 import { useQuery } from "@tanstack/react-query";
 import { DashboardShell, StatCard } from "@/components/dashboard-shell";
 import { ErrorPanel, LoadingPanel } from "@/components/query-states";
@@ -61,7 +62,7 @@ function Matchup() {
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-xs uppercase text-muted-foreground">Environment</div>
           <div className="mt-1 font-semibold">{g.park}</div>
-          <div className="text-xs text-muted-foreground">{g.first_pitch} · {g.weather.conditions}</div>
+          <div className="text-xs text-muted-foreground">{formatGameTime(g.first_pitch)} · {g.weather.conditions}</div>
           <div className="mt-3 space-y-1 text-sm">
             <Row k={`Park HR factor (${g.batter.hand})`} v={String(g.batter.hand === "L" ? g.park_factors.hr_factor_l : g.park_factors.hr_factor_r)} />
             <Row k="Wind" v={`${g.weather.wind_mph} mph ${g.weather.wind_dir}`} />

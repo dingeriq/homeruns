@@ -1,7 +1,7 @@
 """Pydantic response models."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, date as _date
 from typing import List, Optional
 
 from pydantic import BaseModel, Field
@@ -32,7 +32,13 @@ class Player(BaseModel):
 
 class Game(BaseModel):
     game_id: int
+    #: Absolute first pitch (UTC). Kept under the historical field name for
+    #: backwards compatibility with existing clients.
     game_date: datetime
+    #: Official MLB slate ("baseball day") date this game belongs to.
+    slate_date: Optional[_date] = None
+    #: Same instant as ``game_date``, explicitly named and always UTC.
+    first_pitch_utc: Optional[datetime] = None
     home_team: str
     away_team: str
     venue: str

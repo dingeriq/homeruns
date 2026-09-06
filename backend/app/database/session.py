@@ -157,6 +157,8 @@ _COLUMN_MIGRATIONS = (
     ("daily_predictions", "resolution_source", "VARCHAR(32)"),
     # Lineup provenance of a stored prediction ('confirmed'); NULL on legacy rows.
     ("daily_predictions", "lineup_status", "VARCHAR(16)"),
+    # Scheduled first pitch a pregame prediction was locked against; NULL on legacy rows.
+    ("daily_predictions", "first_pitch_utc", "TIMESTAMPTZ"),
 )
 
 #: Additive, idempotent index migrations (create_all skips existing tables).

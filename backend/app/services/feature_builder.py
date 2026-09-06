@@ -16,7 +16,7 @@ denominator is reported alongside it.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 from sqlalchemy import func, select
@@ -350,7 +350,7 @@ def upsert_snapshot(session: Session, row: FeatureRow) -> models.FeatureSnapshot
         )
     ).scalars().first()
     payload = row.as_dict()
-    payload["created_at"] = datetime.utcnow()
+    payload["created_at"] = datetime.now(timezone.utc)
     if existing is None:
         existing = models.FeatureSnapshot(**payload)
         session.add(existing)

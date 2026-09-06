@@ -19,6 +19,7 @@ from app.database import models
 from app.services.feature_builder import FEATURE_SET_VERSION, build_features
 from app.services.hr_model import load_artifact, predict
 from app.services.lineups import CONFIRMED, game_lineup_confirmation
+from app.services.timeutils import ensure_utc, slate_today, utcnow
 
 logger = logging.getLogger("dingeriq.scoring")
 
@@ -46,17 +47,10 @@ def first_pitch_passed(game: Optional[models.Game], now=None) -> bool:
     a local calendar date. An unknown first pitch is treated as *not* started so
     a missing timestamp can never silently discard a pregame prediction.
     """
-    from datetime import datetime, timezone
-
-    dt = getattr(game, "game_datetime", None)
+    dt = ensure_utc(getattr(game, "game_datetime", None))
     if dt is None:
         return False
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    now = now or datetime.now(timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    return now >= dt
+    return (ensure_utc(now) or utcnow()) >= dt
 
 
 def _game_context(session: Session, game_id: int) -> Optional[models.Game]:
@@ -82,7 +76,7 @@ def score_slate(
     Returns ``{"status", "reason", "model_version", "predictions": [...]}`` where
     each prediction matches the ``Prediction`` API contract plus scoring metadata.
     """
-    day = day or date.today()
+    day = day or slate_today()
     artifact = load_artifact()
     if artifact is None:
         return {
@@ -194,7 +188,7 @@ def score_player(
             "status": "unavailable",
             "reason": "model_not_available: no trained model artifact is registered for scoring.",
         }
-    day = game_date or date.today()
+    day = game_date or slate_today()
     try:
         fr = build_features(
             session,
@@ -242,11 +236,9 @@ def store_slate_predictions(
     updates the stored row in place instead of duplicating it. No ingestion, no
     odds, no weather calls, no training.
     """
-    from datetime import datetime, timezone
-
     from sqlalchemy import select as _select
 
-    day = day or date.today()
+    day = day or slate_today()
     result = score_slate(session, day, limit=limit)
     if result.get("status") != "ok":
         return {
@@ -265,7 +257,7 @@ def store_slate_predictions(
         }
 
     D = models.DailyPrediction
-    now = datetime.now(timezone.utc)
+    now = utcnow()
     inserted = updated = skipped_locked = 0
     locked_games: List[int] = []
     started: Dict[int, bool] = {}
@@ -304,6 +296,10 @@ def store_slate_predictions(
             "features_total": p.get("features_total"),
             "imputed_features": p.get("imputed_features"),
             "lineup_status": CONFIRMED,
+            # Absolute scheduled first pitch this pregame value was locked
+            # against. With updated_at (< first_pitch_utc) it proves the stored
+            # probability is the final *pregame* one used for evaluation.
+            "first_pitch_utc": ensure_utc(getattr(_game_context(session, game_id), "game_datetime", None)),
             "updated_at": now,
         }
         if row is None:
@@ -355,7 +351,7 @@ def stored_predictions(
     """
     from sqlalchemy import select as _select
 
-    day = day or date.today()
+    day = day or slate_today()
     D = models.DailyPrediction
     stmt = (
         _select(D)
@@ -395,6 +391,14 @@ def stored_predictions(
                 "imputed_features": r.imputed_features,
                 "lineup_slot": r.lineup_slot,
                 "lineup_status": r.lineup_status,
+                "first_pitch_utc": (
+                    ensure_utc(r.first_pitch_utc).isoformat() if r.first_pitch_utc else None
+                ),
+                "locked_pregame": bool(
+                    r.first_pitch_utc
+                    and r.updated_at
+                    and ensure_utc(r.updated_at) < ensure_utc(r.first_pitch_utc)
+                ),
                 "team": r.team_abbreviation,
             }
             for r in rows

@@ -54,7 +54,12 @@ export type Team = {
 
 type BackendGame = {
   game_id: number | string;
+  /** Absolute first pitch (UTC ISO instant) — legacy field name. */
   game_date: string;
+  /** Official MLB slate ("baseball day") date, YYYY-MM-DD. */
+  slate_date?: string | null;
+  /** Same instant as game_date, explicitly UTC. */
+  first_pitch_utc?: string | null;
   home_team: string;
   away_team: string;
   venue: string;
@@ -94,8 +99,10 @@ export type BackendPrediction = {
 export function adaptGame(g: BackendGame): GameSummary {
   return {
     game_id: String(g.game_id),
-    date: (g.game_date ?? "").slice(0, 10),
-    first_pitch: g.game_date,
+    // The slate date is the authoritative baseball day. Never derive it from
+    // the UTC first-pitch instant: a 9:40pm ET game is already tomorrow in UTC.
+    date: (g.slate_date ?? g.game_date ?? "").slice(0, 10),
+    first_pitch: g.first_pitch_utc ?? g.game_date,
     home_team: g.home_team,
     away_team: g.away_team,
     park: g.venue,

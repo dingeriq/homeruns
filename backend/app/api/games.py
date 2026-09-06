@@ -9,6 +9,7 @@ from sqlalchemy import or_, select
 from app.database import models
 from app.database.session import session_scope
 from app.models.schemas import Game
+from app.services.timeutils import ensure_utc, slate_date_for, slate_today
 
 router = APIRouter(prefix="/games", tags=["games"])
 
@@ -37,7 +38,7 @@ def _slate_game_ids(session, day: date) -> set[int]:
 async def games_today(
     on: Optional[date] = Query(None, description="Slate date (default: today)"),
 ) -> List[Game]:
-    day = on or date.today()
+    day = on or slate_today()
     with session_scope() as s:
         slate_ids = _slate_game_ids(s, day)
         conditions = [models.Game.game_date == day]
@@ -56,6 +57,8 @@ async def games_today(
             Game(
                 game_id=g.game_id,
                 game_date=g.game_datetime,
+                slate_date=g.game_date or slate_date_for(g.game_datetime),
+                first_pitch_utc=ensure_utc(g.game_datetime),
                 home_team=g.home_team,
                 away_team=g.away_team,
                 venue=g.venue,

@@ -350,7 +350,7 @@ def upsert_snapshot(session: Session, row: FeatureRow) -> models.FeatureSnapshot
         )
     ).scalars().first()
     payload = row.as_dict()
-    payload["created_at"] = datetime.utcnow()
+    payload["created_at"] = datetime.now(timezone.utc)
     if existing is None:
         existing = models.FeatureSnapshot(**payload)
         session.add(existing)

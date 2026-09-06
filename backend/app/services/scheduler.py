@@ -18,6 +18,7 @@ from app.services.scoring import store_slate_predictions
 from app.services.sync import run_full_sync
 from app.services.park_factors import compute_park_factors
 from app.services.lineups import sync_lineups
+from app.services.timeutils import slate_today
 from app.services.odds_service import OddsApiNotConfigured, sync_odds
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
@@ -43,7 +44,7 @@ async def _resolve_previous_slate() -> None:
     Deliberately swallows every failure: evaluation is observational and must
     never break the Statcast ingest or startup.
     """
-    day = date.today() - timedelta(days=1)
+    day = slate_today() - timedelta(days=1)
 
     def _run() -> dict:
         with session_scope() as s:
@@ -80,7 +81,7 @@ async def _score_slate_job() -> None:
     missing slate, missing lineups or missing model artifact is logged as a skip
     so the scheduler keeps running.
     """
-    day = date.today()
+    day = slate_today()
 
     def _run() -> dict:
         with session_scope() as s:

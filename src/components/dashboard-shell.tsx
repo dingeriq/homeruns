@@ -15,6 +15,11 @@ const nav = [
   { to: "/features", label: "Feature Importance", icon: BarChart3 },
 ] as const;
 
+function RelativeDay({ slateDate }: { slateDate: string }) {
+  const label = relativeDayLabel(slateDate);
+  return label ? <> · {label}</> : null;
+}
+
 export function DashboardShell({
   children,
   title,

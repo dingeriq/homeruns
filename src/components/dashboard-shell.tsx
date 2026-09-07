@@ -75,7 +75,11 @@ export function DashboardShell({
             {slateDate ? (
               <span className="text-xs text-muted-foreground">
                 {formatSlateDate(slateDate)}
-                {relativeDayLabel(slateDate) ? ` · ${relativeDayLabel(slateDate)}` : ""}
+                {/* Relative label depends on the viewer's local date, so it is
+                    resolved after hydration only. */}
+                <ClientOnly>
+                  <RelativeDay slateDate={slateDate} />
+                </ClientOnly>
               </span>
             ) : (
               <ClientOnly>

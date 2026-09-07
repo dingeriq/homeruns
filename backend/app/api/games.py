@@ -9,12 +9,13 @@ from sqlalchemy import or_, select
 from app.database import models
 from app.database.session import session_scope
 from app.models.schemas import Game
+from app.services.lineups import slate_game_ids
 from app.services.timeutils import ensure_utc, slate_date_for, slate_today
 
 router = APIRouter(prefix="/games", tags=["games"])
 
 
-def _slate_game_ids(session, day: date) -> set[int]:
+def _slate_game_ids(session, day: date) -> set[int]:  # noqa: D401 - thin alias
     """Game ids that the slate for ``day`` actually references.
 
     The MLB schedule date is the *local* game date, but ``games.game_date`` was
@@ -22,16 +23,7 @@ def _slate_game_ids(session, day: date) -> set[int]:
     the following calendar day. Lineups and daily predictions are keyed on the
     slate date, so they are the authoritative source of the slate membership.
     """
-    ids: set[int] = set()
-    for model in (models.GameLineup, models.DailyPrediction):
-        ids.update(
-            int(gid)
-            for gid in session.execute(
-                select(model.game_id).where(model.game_date == day).distinct()
-            ).scalars()
-            if gid is not None
-        )
-    return ids
+    return slate_game_ids(session, day)
 
 
 @router.get("/today", response_model=List[Game])

@@ -15,6 +15,11 @@ const nav = [
   { to: "/features", label: "Feature Importance", icon: BarChart3 },
 ] as const;
 
+function RelativeDay({ slateDate }: { slateDate: string }) {
+  const label = relativeDayLabel(slateDate);
+  return label ? <> · {label}</> : null;
+}
+
 export function DashboardShell({
   children,
   title,
@@ -75,7 +80,11 @@ export function DashboardShell({
             {slateDate ? (
               <span className="text-xs text-muted-foreground">
                 {formatSlateDate(slateDate)}
-                {relativeDayLabel(slateDate) ? ` · ${relativeDayLabel(slateDate)}` : ""}
+                {/* Relative label depends on the viewer's local date, so it is
+                    resolved after hydration only. */}
+                <ClientOnly>
+                  <RelativeDay slateDate={slateDate} />
+                </ClientOnly>
               </span>
             ) : (
               <ClientOnly>

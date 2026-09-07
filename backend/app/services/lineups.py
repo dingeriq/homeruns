@@ -359,6 +359,34 @@ def lineups_for_date(day: Optional[date] = None) -> List[Dict[str, Any]]:
         return [_serialise(r, pa) for r in rows]
 
 
+def slate_game_ids(session, day: date) -> set[int]:
+    """The authoritative slate membership for ``day``.
+
+    One definition, shared by ``GET /games/today`` and
+    ``GET /lineups/confirmation`` so the dashboard's game count and the
+    lineup-status game count can never disagree: every game scheduled on the
+    slate date, plus every game the slate's lineups or stored predictions
+    reference (night games historically stored a UTC first-pitch date that
+    rolled to the next calendar day).
+    """
+    ids: set[int] = {
+        int(gid)
+        for gid in session.execute(
+            select(models.Game.game_id).where(models.Game.game_date == day)
+        ).scalars()
+        if gid is not None
+    }
+    for model in (models.GameLineup, models.DailyPrediction):
+        ids.update(
+            int(gid)
+            for gid in session.execute(
+                select(model.game_id).where(model.game_date == day).distinct()
+            ).scalars()
+            if gid is not None
+        )
+    return ids
+
+
 def game_lineup_confirmation(session, day: date) -> Dict[int, Dict[str, Any]]:
     """Per-game official-lineup confirmation status for a slate date.
 
@@ -388,10 +416,8 @@ def game_lineup_confirmation(session, day: date) -> Dict[int, Dict[str, Any]]:
         elif status == PROJECTED and count and side not in entry["projected_sides"]:
             entry["projected_sides"].append(side)
 
-    # Scheduled games with no stored lineup rows at all still belong in the report.
-    for (game_id,) in session.execute(
-        select(models.Game.game_id).where(models.Game.game_date == day)
-    ).all():
+    # Games with no stored lineup rows at all still belong in the report.
+    for game_id in slate_game_ids(session, day):
         out.setdefault(
             int(game_id),
             {"game_id": int(game_id), "confirmed_sides": [], "projected_sides": [], "starters_confirmed": 0},

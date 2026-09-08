@@ -130,6 +130,47 @@ def _rows_from_players(
     return rows
 
 
+def _normalise_people(people: Any) -> List[Dict[str, Any]]:
+    """Keep only entries MLB gave us a usable person id for.
+
+    The schedule payload is sometimes hydrated with a truthy but unusable
+    ``lineups`` block (placeholder entries, no ``id``). Counting usable rows —
+    rather than trusting truthiness — is what decides whether we fall back to
+    the boxscore.
+    """
+    if not isinstance(people, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for person in people:
+        if not isinstance(person, dict):
+            continue
+        pid = person.get("id")
+        try:
+            pid = int(pid)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        entry = dict(person)
+        entry["id"] = pid
+        out.append(entry)
+    return out
+
+
+def _has_confirmed(session, game_id: int, side: str) -> bool:
+    """True when MLB-posted (confirmed) rows are already stored for this side."""
+    return (
+        session.execute(
+            select(func.count(models.GameLineup.id)).where(
+                models.GameLineup.game_id == game_id,
+                models.GameLineup.side == side,
+                models.GameLineup.status == CONFIRMED,
+            )
+        ).scalar()
+        or 0
+    ) > 0
+
+
+
+
 def _batting_order_from_boxscore(payload: Dict[str, Any], side: str) -> List[Dict[str, Any]]:
     team = ((payload.get("teams") or {}).get(side)) or {}
     order = team.get("battingOrder") or []
@@ -231,7 +272,18 @@ def _projected_rows(
 
 
 def _store(session, game_id: int, rows: List[Dict[str, Any]], side: str) -> int:
-    """Replace the stored lineup for one side of one game (idempotent)."""
+    """Replace the stored lineup for one side of one game (idempotent).
+
+    An empty row list is never destructive: rather than wiping the side, the
+    refresh is rejected and whatever is already stored is preserved.
+    """
+    if not rows:
+        logger.info(
+            "Lineup refresh rejected (empty rows) for game %s %s — existing rows preserved",
+            game_id,
+            side,
+        )
+        return 0
     session.execute(
         delete(models.GameLineup).where(
             models.GameLineup.game_id == game_id, models.GameLineup.side == side
@@ -243,7 +295,11 @@ def _store(session, game_id: int, rows: List[Dict[str, Any]], side: str) -> int:
 
 
 async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None = None) -> Dict[str, Any]:
-    """Ingest confirmed lineups for a slate, projecting where MLB has none yet."""
+    """Ingest confirmed lineups for a slate, projecting where MLB has none yet.
+
+    Authority hierarchy: ``confirmed > projected > empty/failed``. A lower
+    authority refresh never overwrites stored confirmed rows.
+    """
     day = on or slate_today()
     client = client or MLBStatsClient()
     payload = await client.schedule(day)
@@ -251,6 +307,7 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
     confirmed_sides = 0
     projected_sides = 0
     unavailable_sides = 0
+    preserved_sides = 0
     stored = 0
     unmatched_players: List[int] = []
     games_seen = 0
@@ -265,16 +322,40 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                 team = (teams.get(side) or {}).get("team") or {}
                 team_id = team.get("id")
                 team_abbr = team.get("abbreviation") or team.get("teamCode")
-                people = lineups.get(key) or []
+                raw = lineups.get(key)
+                people = _normalise_people(raw)
                 status = CONFIRMED
                 source = "mlb_stats_api:schedule.lineups"
                 if not people:
+                    if raw:
+                        logger.info(
+                            "Schedule lineup present but unusable for game %s %s (%d raw entries, 0 usable)",
+                            game_id,
+                            side,
+                            len(raw) if isinstance(raw, list) else 1,
+                        )
+                    else:
+                        logger.debug("Schedule lineup absent for game %s %s", game_id, side)
+                    logger.debug("Attempting boxscore fallback for game %s %s", game_id, side)
                     try:
                         box = await client.boxscore(game_id)
-                        people = _batting_order_from_boxscore(box, side)
-                        source = "mlb_stats_api:boxscore.battingOrder"
+                        people = _normalise_people(_batting_order_from_boxscore(box, side))
+                        if people:
+                            source = "mlb_stats_api:boxscore.battingOrder"
+                            logger.info(
+                                "Boxscore fallback succeeded for game %s %s (%d starters)",
+                                game_id,
+                                side,
+                                len(people),
+                            )
+                        else:
+                            logger.info(
+                                "Boxscore fallback returned no usable batting order for game %s %s",
+                                game_id,
+                                side,
+                            )
                     except Exception as exc:  # boxscore only exists near/after first pitch
-                        logger.debug("Boxscore unavailable for %s: %s", game_id, exc)
+                        logger.info("Boxscore fallback failed for game %s %s: %s", game_id, side, exc)
                         people = []
                 with session_scope() as s:
                     if people:
@@ -286,6 +367,20 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                         unmatched_players.extend(sorted(set(ids) - known))
                         stored += _store(s, game_id, rows, side)
                         confirmed_sides += 1
+                        logger.info(
+                            "Confirmed lineup persisted for game %s %s (%d slots, %s)",
+                            game_id,
+                            side,
+                            len(rows),
+                            source,
+                        )
+                    elif _has_confirmed(s, game_id, side):
+                        preserved_sides += 1
+                        logger.info(
+                            "Weaker lineup refresh rejected for game %s %s — confirmed lineup already stored",
+                            game_id,
+                            side,
+                        )
                     else:
                         rows = _projected_rows(s, game_id, day, side, team_id, team_abbr)
                         if rows:
@@ -300,6 +395,8 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
         "confirmed_sides": confirmed_sides,
         "projected_sides": projected_sides,
         "unavailable_sides": unavailable_sides,
+        "preserved_confirmed_sides": preserved_sides,
+
         "lineup_slots_stored": stored,
         "players_not_in_canonical_table": sorted(set(unmatched_players)),
     }

@@ -255,3 +255,212 @@ def test_prediction_detail_reports_missing_lineup(sqlite_db):
     assert detail.lineup.status == "unavailable"
     assert detail.model_features.values["lineup_slot"] is None
     assert "lineup" in detail.data_availability.unavailable
+
+
+# ---------------------------------------------------------------------------
+# Lineup-ingestion hardening regressions
+# ---------------------------------------------------------------------------
+
+
+def _malformed_schedule(game_id: int = 700101):
+    """Truthy schedule lineups whose entries carry no usable person id."""
+    return {
+        "dates": [
+            {
+                "games": [
+                    {
+                        "gamePk": game_id,
+                        "teams": {
+                            "home": {"team": {"id": 147, "abbreviation": "NYY"}},
+                            "away": {"team": {"id": 111, "abbreviation": "BOS"}},
+                        },
+                        "lineups": {
+                            "homePlayers": [{"fullName": "Placeholder"}, {"id": None}],
+                            "awayPlayers": [{"fullName": "Placeholder"}],
+                        },
+                    }
+                ]
+            }
+        ]
+    }
+
+
+def _boxscore(home_ids, away_ids=()):
+    def team(ids):
+        return {
+            "battingOrder": list(ids),
+            "players": {
+                f"ID{pid}": {
+                    "person": {"id": pid, "fullName": f"Box {pid}"},
+                    "position": {"abbreviation": "SS"},
+                }
+                for pid in ids
+            },
+        }
+
+    return {"teams": {"home": team(home_ids), "away": team(away_ids)}}
+
+
+def test_absent_schedule_lineup_uses_boxscore_fallback(sqlite_db):
+    """A — no schedule lineup at all falls back to the boxscore."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    result = asyncio.run(
+        sync_lineups(
+            on=date(2025, 6, 10),
+            client=FakeClient(_schedule(False, 700110), _boxscore([8001, 8002, 8003])),
+        )
+    )
+    assert result["confirmed_sides"] == 1  # away has no batting order
+    home = [r for r in lineups_for_game(700110) if r["side"] == "home"]
+    assert [r["player_id"] for r in home] == [8001, 8002, 8003]
+    assert all(r["status"] == "confirmed" for r in home)
+    assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in home)
+
+
+def test_malformed_truthy_schedule_lineup_uses_boxscore_fallback(sqlite_db):
+    """B — truthy but unusable schedule lineup must not block the fallback."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    result = asyncio.run(
+        sync_lineups(
+            on=date(2025, 6, 11),
+            client=FakeClient(_malformed_schedule(700111), _boxscore([8101, 8102], [8201, 8202])),
+        )
+    )
+    assert result["confirmed_sides"] == 2
+    rows = lineups_for_game(700111)
+    assert [r["player_id"] for r in rows if r["side"] == "home"] == [8101, 8102]
+    assert [r["player_id"] for r in rows if r["side"] == "away"] == [8201, 8202]
+    assert all(r["status"] == "confirmed" for r in rows)
+    assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in rows)
+
+
+def test_zero_normalised_rows_never_delete_confirmed_lineup(sqlite_db):
+    """C — a refresh that yields nothing usable leaves confirmed rows intact."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    asyncio.run(sync_lineups(on=date(2025, 6, 12), client=FakeClient(_schedule(True, 700112))))
+    before = lineups_for_game(700112)
+    assert len(before) == 18
+
+    result = asyncio.run(
+        sync_lineups(on=date(2025, 6, 12), client=FakeClient(_malformed_schedule(700112), None))
+    )
+    assert result["confirmed_sides"] == 0
+    assert result["preserved_confirmed_sides"] == 2
+    after = lineups_for_game(700112)
+    assert [r["player_id"] for r in after] == [r["player_id"] for r in before]
+    assert all(r["status"] == "confirmed" for r in after)
+
+
+def test_boxscore_failure_does_not_replace_confirmed_with_projected(sqlite_db):
+    """D — a boxscore outage must not downgrade a stored confirmed lineup."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    asyncio.run(sync_lineups(on=date(2025, 6, 13), client=FakeClient(_schedule(True, 700113))))
+    result = asyncio.run(
+        sync_lineups(on=date(2025, 6, 13), client=FakeClient(_schedule(False, 700113), None))
+    )
+    assert result["projected_sides"] == 0
+    assert result["preserved_confirmed_sides"] == 2
+    rows = lineups_for_game(700113)
+    assert len(rows) == 18
+    assert all(r["status"] == "confirmed" for r in rows)
+
+
+def test_boxscore_failure_without_history_keeps_projected_behaviour(sqlite_db):
+    """E — with no confirmed rows the projected fallback still applies."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    asyncio.run(sync_lineups(on=date(2025, 6, 14), client=FakeClient(_schedule(True, 700114))))
+    result = asyncio.run(
+        sync_lineups(on=date(2025, 6, 15), client=FakeClient(_schedule(False, 700115), None))
+    )
+    assert result["projected_sides"] == 2
+    assert result["preserved_confirmed_sides"] == 0
+    assert all(r["status"] == "projected" for r in lineups_for_game(700115))
+
+
+def test_weaker_refresh_never_downgrades_confirmed_lineup(sqlite_db):
+    """F — confirmed survives repeated weak refreshes."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    asyncio.run(sync_lineups(on=date(2025, 6, 16), client=FakeClient(_schedule(True, 700116))))
+    for client in (
+        FakeClient(_malformed_schedule(700116), None),
+        FakeClient(_schedule(False, 700116), None),
+        FakeClient(_malformed_schedule(700116), _boxscore([], [])),
+    ):
+        asyncio.run(sync_lineups(on=date(2025, 6, 16), client=client))
+    rows = lineups_for_game(700116)
+    assert len(rows) == 18
+    assert all(r["status"] == "confirmed" for r in rows)
+    assert all(r["source"] == "mlb_stats_api:schedule.lineups" for r in rows)
+
+
+def test_sides_are_independent(sqlite_db):
+    """G — one side confirming does not disturb the other side."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    # Home confirms from the boxscore; away has nothing anywhere.
+    asyncio.run(
+        sync_lineups(
+            on=date(2025, 6, 17),
+            client=FakeClient(_schedule(False, 700117), _boxscore([8301, 8302])),
+        )
+    )
+    rows = lineups_for_game(700117)
+    assert [r["side"] for r in rows] == ["home", "home"]
+
+    # A later away-only boxscore must not touch the stored home rows.
+    asyncio.run(
+        sync_lineups(
+            on=date(2025, 6, 17),
+            client=FakeClient(_schedule(False, 700117), _boxscore([], [8401, 8402])),
+        )
+    )
+    rows = lineups_for_game(700117)
+    assert [r["player_id"] for r in rows if r["side"] == "home"] == [8301, 8302]
+    assert [r["player_id"] for r in rows if r["side"] == "away"] == [8401, 8402]
+    assert all(r["status"] == "confirmed" for r in rows)
+
+
+def test_doubleheader_games_persist_independently(sqlite_db):
+    """H — game 2's weak refresh cannot disturb game 1's confirmed lineup."""
+    from app.services.lineups import lineups_for_game, sync_lineups
+
+    day = date(2025, 6, 18)
+    game_one = _schedule(True, 700118)["dates"][0]["games"][0]
+    game_two = _malformed_schedule(700119)["dates"][0]["games"][0]
+    asyncio.run(
+        sync_lineups(on=day, client=FakeClient({"dates": [{"games": [game_one, game_two]}]}, None))
+    )
+    assert len(lineups_for_game(700118)) == 18
+    assert lineups_for_game(700119) == []
+
+    # Second pass: game 2 gets a boxscore, game 1 goes weak — both hold their own.
+    game_one_weak = _malformed_schedule(700118)["dates"][0]["games"][0]
+    asyncio.run(
+        sync_lineups(
+            on=day,
+            client=FakeClient(
+                {"dates": [{"games": [game_one_weak, game_two]}]}, _boxscore([8501, 8502], [8601])
+            ),
+        )
+    )
+    assert len(lineups_for_game(700118)) == 18
+    assert all(r["status"] == "confirmed" for r in lineups_for_game(700118))
+    two = lineups_for_game(700119)
+    assert [r["player_id"] for r in two if r["side"] == "home"] == [8501, 8502]
+    assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in two)
+
+
+def test_store_rejects_empty_rows(sqlite_db):
+    """Unit-level guard: _store() with no rows deletes nothing."""
+    from app.services.lineups import _store, lineups_for_game, sync_lineups
+
+    asyncio.run(sync_lineups(on=date(2025, 6, 19), client=FakeClient(_schedule(True, 700120))))
+    with sqlite_db.session_scope() as s:
+        assert _store(s, 700120, [], "home") == 0
+    assert len(lineups_for_game(700120)) == 18

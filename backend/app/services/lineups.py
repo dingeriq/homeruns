@@ -389,13 +389,14 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                         else:
                             unavailable_sides += 1
 
-
     result = {
         "date": day.isoformat(),
         "games": games_seen,
         "confirmed_sides": confirmed_sides,
         "projected_sides": projected_sides,
         "unavailable_sides": unavailable_sides,
+        "preserved_confirmed_sides": preserved_sides,
+
         "lineup_slots_stored": stored,
         "players_not_in_canonical_table": sorted(set(unmatched_players)),
     }

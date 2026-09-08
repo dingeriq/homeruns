@@ -130,6 +130,47 @@ def _rows_from_players(
     return rows
 
 
+def _normalise_people(people: Any) -> List[Dict[str, Any]]:
+    """Keep only entries MLB gave us a usable person id for.
+
+    The schedule payload is sometimes hydrated with a truthy but unusable
+    ``lineups`` block (placeholder entries, no ``id``). Counting usable rows —
+    rather than trusting truthiness — is what decides whether we fall back to
+    the boxscore.
+    """
+    if not isinstance(people, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for person in people:
+        if not isinstance(person, dict):
+            continue
+        pid = person.get("id")
+        try:
+            pid = int(pid)  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            continue
+        entry = dict(person)
+        entry["id"] = pid
+        out.append(entry)
+    return out
+
+
+def _has_confirmed(session, game_id: int, side: str) -> bool:
+    """True when MLB-posted (confirmed) rows are already stored for this side."""
+    return (
+        session.execute(
+            select(func.count(models.GameLineup.id)).where(
+                models.GameLineup.game_id == game_id,
+                models.GameLineup.side == side,
+                models.GameLineup.status == CONFIRMED,
+            )
+        ).scalar()
+        or 0
+    ) > 0
+
+
+
+
 def _batting_order_from_boxscore(payload: Dict[str, Any], side: str) -> List[Dict[str, Any]]:
     team = ((payload.get("teams") or {}).get(side)) or {}
     order = team.get("battingOrder") or []

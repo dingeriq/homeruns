@@ -439,14 +439,19 @@ def test_doubleheader_games_persist_independently(sqlite_db):
     assert len(lineups_for_game(700118)) == 18
     assert lineups_for_game(700119) == []
 
-    # Second pass: game 2 gets a boxscore, game 1 goes weak — both hold their own.
+    # Second pass: game 2 gets a boxscore, game 1 has none — both hold their own.
     game_one_weak = _malformed_schedule(700118)["dates"][0]["games"][0]
+
+    class PerGameClient(FakeClient):
+        async def boxscore(self, game_pk):
+            if game_pk != 700119:
+                raise RuntimeError("boxscore not published")
+            return _boxscore([8501, 8502], [8601])
+
     asyncio.run(
         sync_lineups(
             on=day,
-            client=FakeClient(
-                {"dates": [{"games": [game_one_weak, game_two]}]}, _boxscore([8501, 8502], [8601])
-            ),
+            client=PerGameClient({"dates": [{"games": [game_one_weak, game_two]}]}, None),
         )
     )
     assert len(lineups_for_game(700118)) == 18

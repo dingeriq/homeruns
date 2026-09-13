@@ -25,11 +25,19 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 API_BASE_URL = os.environ.get("API_BASE_URL", "").rstrip("/")
 LIVE = bool(API_BASE_URL)
 
+# Admin endpoints require a shared secret. In-process tests use a fixed test
+# key; live runs take the real key from the environment.
+TEST_ADMIN_KEY = "test-admin-key"
+if not LIVE:
+    os.environ.setdefault("ADMIN_API_KEY", TEST_ADMIN_KEY)
+ADMIN_KEY = os.environ.get("ADMIN_API_KEY", TEST_ADMIN_KEY)
+
 
 @pytest.fixture(scope="session")
 def client() -> Iterator[httpx.Client]:
+    headers = {"X-Admin-Key": ADMIN_KEY}
     if LIVE:
-        with httpx.Client(base_url=API_BASE_URL, timeout=30.0) as c:
+        with httpx.Client(base_url=API_BASE_URL, timeout=30.0, headers=headers) as c:
             yield c
         return
 
@@ -38,7 +46,7 @@ def client() -> Iterator[httpx.Client]:
     from app.main import app  # imported lazily so sys.path is set first
 
     # TestClient runs the ASGI app in-process and works across httpx versions.
-    with TestClient(app, base_url="http://testserver") as c:
+    with TestClient(app, base_url="http://testserver", headers=headers) as c:
         yield c
 
 

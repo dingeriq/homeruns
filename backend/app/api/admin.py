@@ -2,10 +2,14 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import logging
+import os
 from datetime import date, timedelta
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.database.session import session_scope
 from app.monitoring import record_synced_counts, track_job
@@ -34,7 +38,34 @@ from app.services.sync import run_full_sync
 from app.services.odds_service import OddsApiNotConfigured, sync_odds
 from app.services.weather_service import OpenWeatherNotConfigured, sync_weather
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+logger = logging.getLogger("dingeriq.api.admin")
+
+
+def require_admin_key(request: Request) -> None:
+    """Shared-secret gate for every /admin endpoint.
+
+    Reads ``ADMIN_API_KEY`` from the environment at request time and compares
+    it against the ``X-Admin-Key`` header with a timing-safe comparison of
+    SHA-256 digests (equal-length inputs, so no length leak). Fails closed:
+    when the server key is not configured, admin access is denied entirely.
+    """
+    expected = (os.environ.get("ADMIN_API_KEY") or "").strip()
+    if not expected:
+        logger.warning("Admin request denied: ADMIN_API_KEY is not configured")
+        raise HTTPException(status_code=401, detail="admin access is not configured")
+    provided = request.headers.get("X-Admin-Key") or ""
+    a = hashlib.sha256(provided.encode("utf-8")).digest()
+    b = hashlib.sha256(expected.encode("utf-8")).digest()
+    if not hmac.compare_digest(a, b):
+        logger.warning("Admin request denied: missing or incorrect X-Admin-Key")
+        raise HTTPException(status_code=401, detail="invalid admin key")
+
+
+router = APIRouter(
+    prefix="/admin",
+    tags=["admin"],
+    dependencies=[Depends(require_admin_key)],
+)
 
 
 @router.get("/data-audit")

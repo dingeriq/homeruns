@@ -24,6 +24,7 @@ from sqlalchemy import delete, func, select
 from app.database import models
 from app.database.session import session_scope
 from app.services.mlb_client import MLBStatsClient
+from app.services.timeutils import slate_today
 from app.services.sync import _upsert  # noqa: F401  (kept for parity/imports)
 
 logger = logging.getLogger("dingeriq.lineups")

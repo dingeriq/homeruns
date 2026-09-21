@@ -24,6 +24,7 @@ from sqlalchemy import delete, func, select
 from app.database import models
 from app.database.session import session_scope
 from app.services.mlb_client import MLBStatsClient
+from app.services.timeutils import slate_today
 from app.services.sync import _upsert  # noqa: F401  (kept for parity/imports)
 
 logger = logging.getLogger("dingeriq.lineups")
@@ -33,6 +34,18 @@ PROJECTED = "projected"
 
 # Minimum stored (slot, game) samples before an empirical PA average is exposed.
 MIN_PA_SAMPLES = 25
+# A posted MLB lineup card is exactly nine distinct batters.
+LINEUP_SLOTS = 9
+# Only these abstract game states may create a *new* confirmed lineup.
+PREGAME_ABSTRACT_STATES = {"preview"}
+PREGAME_DETAILED_STATES = {
+    "scheduled",
+    "pre-game",
+    "warmup",
+    "delayed start",
+    "delayed",
+    "postponed",
+}
 # How many recent confirmed lineups back a projection.
 PROJECTION_LOOKBACK_GAMES = 10
 
@@ -171,12 +184,35 @@ def _has_confirmed(session, game_id: int, side: str) -> bool:
 
 
 
+def _is_full_card(people: List[Dict[str, Any]]) -> bool:
+    """Exactly nine usable, distinct player ids — MLB posts nothing less."""
+    if len(people) != LINEUP_SLOTS:
+        return False
+    ids = {p["id"] for p in people}
+    return len(ids) == LINEUP_SLOTS
+
+
+def _is_pregame(game: Dict[str, Any]) -> bool:
+    """True when the schedule game has not started yet.
+
+    MLB exposes no official/confirmed lineup flag (verified against live
+    responses), so game state is the guard that stops an in-progress or final
+    boxscore from being read as a freshly posted lineup card.
+    """
+    status = game.get("status") or {}
+    abstract = str(status.get("abstractGameState") or "").strip().lower()
+    detailed = str(status.get("detailedState") or "").strip().lower()
+    if abstract:
+        return abstract in PREGAME_ABSTRACT_STATES
+    return detailed in PREGAME_DETAILED_STATES
+
+
 def _batting_order_from_boxscore(payload: Dict[str, Any], side: str) -> List[Dict[str, Any]]:
     team = ((payload.get("teams") or {}).get(side)) or {}
     order = team.get("battingOrder") or []
     players = team.get("players") or {}
     out: List[Dict[str, Any]] = []
-    for pid in order[:9]:
+    for pid in order:
         entry = players.get(f"ID{pid}") or {}
         person = entry.get("person") or {}
         out.append(
@@ -318,6 +354,14 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
             game_id = g["gamePk"]
             lineups = g.get("lineups") or {}
             teams = g.get("teams") or {}
+            pregame = _is_pregame(g)
+            if not pregame:
+                logger.info(
+                    "Game %s is not pregame (%s / %s) — no new confirmed lineup will be created",
+                    game_id,
+                    (g.get("status") or {}).get("abstractGameState"),
+                    (g.get("status") or {}).get("detailedState"),
+                )
             for side, key in (("home", "homePlayers"), ("away", "awayPlayers")):
                 team = (teams.get(side) or {}).get("team") or {}
                 team_id = team.get("id")
@@ -326,10 +370,21 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                 people = _normalise_people(raw)
                 status = CONFIRMED
                 source = "mlb_stats_api:schedule.lineups"
-                if not people:
+                if people and not _is_full_card(people):
+                    logger.info(
+                        "Schedule lineup incomplete for game %s %s (%d usable, %d distinct) — not confirmable",
+                        game_id,
+                        side,
+                        len(people),
+                        len({p["id"] for p in people}),
+                    )
+                    people = []
+                if not pregame:
+                    people = []
+                if not people and pregame:
                     if raw:
                         logger.info(
-                            "Schedule lineup present but unusable for game %s %s (%d raw entries, 0 usable)",
+                            "Schedule lineup present but unusable for game %s %s (%d raw entries)",
                             game_id,
                             side,
                             len(raw) if isinstance(raw, list) else 1,
@@ -340,6 +395,15 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                     try:
                         box = await client.boxscore(game_id)
                         people = _normalise_people(_batting_order_from_boxscore(box, side))
+                        if people and not _is_full_card(people):
+                            logger.info(
+                                "Boxscore batting order incomplete for game %s %s (%d usable, %d distinct) — not confirmable",
+                                game_id,
+                                side,
+                                len(people),
+                                len({p["id"] for p in people}),
+                            )
+                            people = []
                         if people:
                             source = "mlb_stats_api:boxscore.battingOrder"
                             logger.info(

@@ -634,8 +634,10 @@ def test_projected_rows_never_count_as_confirmed(sqlite_db):
     asyncio.run(sync_lineups(on=date(2025, 7, 13), client=FakeClient(_schedule(True, 700213))))
     asyncio.run(sync_lineups(on=date(2025, 7, 14), client=FakeClient(_schedule(False, 700214), None)))
     with sqlite_db.session_scope() as s:
-        status = game_lineup_confirmation(s, 700214)
-    assert status["confirmed"] is False
+        report = game_lineup_confirmation(s, date(2025, 7, 14))
+    entry = report[700214]
+    assert entry["confirmed_sides"] == []
+    assert sorted(entry["projected_sides"]) == ["away", "home"]
 
 
 def test_sync_lineups_without_date_does_not_raise_name_error(sqlite_db):

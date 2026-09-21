@@ -38,9 +38,32 @@ class FakeClient:
         return self._boxscore
 
 
-def _schedule(with_lineups: bool, game_id: int = 700001):
+PREGAME_STATUS = {"abstractGameState": "Preview", "detailedState": "Pre-Game"}
+LIVE_STATUS = {"abstractGameState": "Live", "detailedState": "In Progress"}
+FINAL_STATUS = {"abstractGameState": "Final", "detailedState": "Final"}
+
+
+def _seq(base: int, n: int = 9):
+    return [base + i for i in range(1, n + 1)]
+
+
+def _people(ids, prefix="Hitter", position="OF"):
+    return [
+        {"id": pid, "fullName": f"{prefix} {pid}", "primaryPosition": {"abbreviation": position}}
+        for pid in ids
+    ]
+
+
+def _schedule(
+    with_lineups: bool,
+    game_id: int = 700001,
+    status=None,
+    home_ids=None,
+    away_ids=None,
+):
     game = {
         "gamePk": game_id,
+        "status": dict(status or PREGAME_STATUS),
         "teams": {
             "home": {"team": {"id": 147, "abbreviation": "NYY"}},
             "away": {"team": {"id": 111, "abbreviation": "BOS"}},
@@ -48,14 +71,8 @@ def _schedule(with_lineups: bool, game_id: int = 700001):
     }
     if with_lineups:
         game["lineups"] = {
-            "homePlayers": [
-                {"id": 1000 + i, "fullName": f"Home Hitter {i}", "primaryPosition": {"abbreviation": "OF"}}
-                for i in range(1, 10)
-            ],
-            "awayPlayers": [
-                {"id": 2000 + i, "fullName": f"Away Hitter {i}", "primaryPosition": {"abbreviation": "1B"}}
-                for i in range(1, 10)
-            ],
+            "homePlayers": _people(_seq(1000) if home_ids is None else home_ids, "Home Hitter", "OF"),
+            "awayPlayers": _people(_seq(2000) if away_ids is None else away_ids, "Away Hitter", "1B"),
         }
     return {"dates": [{"games": [game]}]}
 
@@ -102,13 +119,13 @@ def test_boxscore_fallback_supplies_batting_order(sqlite_db):
     box = {
         "teams": {
             "home": {
-                "battingOrder": [3001, 3002, 3003],
+                "battingOrder": _seq(3000),
                 "players": {
                     f"ID{pid}": {
                         "person": {"id": pid, "fullName": f"Box {pid}"},
                         "position": {"abbreviation": "SS"},
                     }
-                    for pid in (3001, 3002, 3003)
+                    for pid in _seq(3000)
                 },
             },
             "away": {"battingOrder": [], "players": {}},
@@ -118,7 +135,7 @@ def test_boxscore_fallback_supplies_batting_order(sqlite_db):
         sync_lineups(on=date(2025, 6, 2), client=FakeClient(_schedule(False, 700002), box))
     )
     rows = lineups_for_game(700002)
-    assert [r["player_id"] for r in rows if r["side"] == "home"] == [3001, 3002, 3003]
+    assert [r["player_id"] for r in rows if r["side"] == "home"] == _seq(3000)
     assert all(r["source"].endswith("battingOrder") for r in rows)
 
 
@@ -270,6 +287,7 @@ def _malformed_schedule(game_id: int = 700101):
                 "games": [
                     {
                         "gamePk": game_id,
+                        "status": dict(PREGAME_STATUS),
                         "teams": {
                             "home": {"team": {"id": 147, "abbreviation": "NYY"}},
                             "away": {"team": {"id": 111, "abbreviation": "BOS"}},
@@ -308,12 +326,12 @@ def test_absent_schedule_lineup_uses_boxscore_fallback(sqlite_db):
     result = asyncio.run(
         sync_lineups(
             on=date(2025, 6, 10),
-            client=FakeClient(_schedule(False, 700110), _boxscore([8001, 8002, 8003])),
+            client=FakeClient(_schedule(False, 700110), _boxscore(_seq(8000))),
         )
     )
     assert result["confirmed_sides"] == 1  # away has no batting order
     home = [r for r in lineups_for_game(700110) if r["side"] == "home"]
-    assert [r["player_id"] for r in home] == [8001, 8002, 8003]
+    assert [r["player_id"] for r in home] == _seq(8000)
     assert all(r["status"] == "confirmed" for r in home)
     assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in home)
 
@@ -325,13 +343,13 @@ def test_malformed_truthy_schedule_lineup_uses_boxscore_fallback(sqlite_db):
     result = asyncio.run(
         sync_lineups(
             on=date(2025, 6, 11),
-            client=FakeClient(_malformed_schedule(700111), _boxscore([8101, 8102], [8201, 8202])),
+            client=FakeClient(_malformed_schedule(700111), _boxscore(_seq(8100), _seq(8200))),
         )
     )
     assert result["confirmed_sides"] == 2
     rows = lineups_for_game(700111)
-    assert [r["player_id"] for r in rows if r["side"] == "home"] == [8101, 8102]
-    assert [r["player_id"] for r in rows if r["side"] == "away"] == [8201, 8202]
+    assert [r["player_id"] for r in rows if r["side"] == "home"] == _seq(8100)
+    assert [r["player_id"] for r in rows if r["side"] == "away"] == _seq(8200)
     assert all(r["status"] == "confirmed" for r in rows)
     assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in rows)
 
@@ -407,22 +425,22 @@ def test_sides_are_independent(sqlite_db):
     asyncio.run(
         sync_lineups(
             on=date(2025, 6, 17),
-            client=FakeClient(_schedule(False, 700117), _boxscore([8301, 8302])),
+            client=FakeClient(_schedule(False, 700117), _boxscore(_seq(8300))),
         )
     )
     rows = lineups_for_game(700117)
-    assert [r["side"] for r in rows] == ["home", "home"]
+    assert {r["side"] for r in rows} == {"home"} and len(rows) == 9
 
     # A later away-only boxscore must not touch the stored home rows.
     asyncio.run(
         sync_lineups(
             on=date(2025, 6, 17),
-            client=FakeClient(_schedule(False, 700117), _boxscore([], [8401, 8402])),
+            client=FakeClient(_schedule(False, 700117), _boxscore([], _seq(8400))),
         )
     )
     rows = lineups_for_game(700117)
-    assert [r["player_id"] for r in rows if r["side"] == "home"] == [8301, 8302]
-    assert [r["player_id"] for r in rows if r["side"] == "away"] == [8401, 8402]
+    assert [r["player_id"] for r in rows if r["side"] == "home"] == _seq(8300)
+    assert [r["player_id"] for r in rows if r["side"] == "away"] == _seq(8400)
     assert all(r["status"] == "confirmed" for r in rows)
 
 
@@ -446,7 +464,7 @@ def test_doubleheader_games_persist_independently(sqlite_db):
         async def boxscore(self, game_pk):
             if game_pk != 700119:
                 raise RuntimeError("boxscore not published")
-            return _boxscore([8501, 8502], [8601])
+            return _boxscore(_seq(8500), [8601])
 
     asyncio.run(
         sync_lineups(
@@ -457,7 +475,7 @@ def test_doubleheader_games_persist_independently(sqlite_db):
     assert len(lineups_for_game(700118)) == 18
     assert all(r["status"] == "confirmed" for r in lineups_for_game(700118))
     two = lineups_for_game(700119)
-    assert [r["player_id"] for r in two if r["side"] == "home"] == [8501, 8502]
+    assert [r["player_id"] for r in two if r["side"] == "home"] == _seq(8500)
     assert all(r["source"] == "mlb_stats_api:boxscore.battingOrder" for r in two)
 
 

@@ -354,6 +354,14 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
             game_id = g["gamePk"]
             lineups = g.get("lineups") or {}
             teams = g.get("teams") or {}
+            pregame = _is_pregame(g)
+            if not pregame:
+                logger.info(
+                    "Game %s is not pregame (%s / %s) — no new confirmed lineup will be created",
+                    game_id,
+                    (g.get("status") or {}).get("abstractGameState"),
+                    (g.get("status") or {}).get("detailedState"),
+                )
             for side, key in (("home", "homePlayers"), ("away", "awayPlayers")):
                 team = (teams.get(side) or {}).get("team") or {}
                 team_id = team.get("id")
@@ -362,10 +370,21 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                 people = _normalise_people(raw)
                 status = CONFIRMED
                 source = "mlb_stats_api:schedule.lineups"
-                if not people:
+                if people and not _is_full_card(people):
+                    logger.info(
+                        "Schedule lineup incomplete for game %s %s (%d usable, %d distinct) — not confirmable",
+                        game_id,
+                        side,
+                        len(people),
+                        len({p["id"] for p in people}),
+                    )
+                    people = []
+                if not pregame:
+                    people = []
+                if not people and pregame:
                     if raw:
                         logger.info(
-                            "Schedule lineup present but unusable for game %s %s (%d raw entries, 0 usable)",
+                            "Schedule lineup present but unusable for game %s %s (%d raw entries)",
                             game_id,
                             side,
                             len(raw) if isinstance(raw, list) else 1,
@@ -376,6 +395,15 @@ async def sync_lineups(on: Optional[date] = None, client: MLBStatsClient | None 
                     try:
                         box = await client.boxscore(game_id)
                         people = _normalise_people(_batting_order_from_boxscore(box, side))
+                        if people and not _is_full_card(people):
+                            logger.info(
+                                "Boxscore batting order incomplete for game %s %s (%d usable, %d distinct) — not confirmable",
+                                game_id,
+                                side,
+                                len(people),
+                                len({p["id"] for p in people}),
+                            )
+                            people = []
                         if people:
                             source = "mlb_stats_api:boxscore.battingOrder"
                             logger.info(

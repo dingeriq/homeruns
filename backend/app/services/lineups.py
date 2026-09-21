@@ -184,12 +184,35 @@ def _has_confirmed(session, game_id: int, side: str) -> bool:
 
 
 
+def _is_full_card(people: List[Dict[str, Any]]) -> bool:
+    """Exactly nine usable, distinct player ids — MLB posts nothing less."""
+    if len(people) != LINEUP_SLOTS:
+        return False
+    ids = {p["id"] for p in people}
+    return len(ids) == LINEUP_SLOTS
+
+
+def _is_pregame(game: Dict[str, Any]) -> bool:
+    """True when the schedule game has not started yet.
+
+    MLB exposes no official/confirmed lineup flag (verified against live
+    responses), so game state is the guard that stops an in-progress or final
+    boxscore from being read as a freshly posted lineup card.
+    """
+    status = game.get("status") or {}
+    abstract = str(status.get("abstractGameState") or "").strip().lower()
+    detailed = str(status.get("detailedState") or "").strip().lower()
+    if abstract:
+        return abstract in PREGAME_ABSTRACT_STATES
+    return detailed in PREGAME_DETAILED_STATES
+
+
 def _batting_order_from_boxscore(payload: Dict[str, Any], side: str) -> List[Dict[str, Any]]:
     team = ((payload.get("teams") or {}).get(side)) or {}
     order = team.get("battingOrder") or []
     players = team.get("players") or {}
     out: List[Dict[str, Any]] = []
-    for pid in order[:9]:
+    for pid in order:
         entry = players.get(f"ID{pid}") or {}
         person = entry.get("person") or {}
         out.append(

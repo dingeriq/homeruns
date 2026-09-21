@@ -34,6 +34,18 @@ PROJECTED = "projected"
 
 # Minimum stored (slot, game) samples before an empirical PA average is exposed.
 MIN_PA_SAMPLES = 25
+# A posted MLB lineup card is exactly nine distinct batters.
+LINEUP_SLOTS = 9
+# Only these abstract game states may create a *new* confirmed lineup.
+PREGAME_ABSTRACT_STATES = {"preview"}
+PREGAME_DETAILED_STATES = {
+    "scheduled",
+    "pre-game",
+    "warmup",
+    "delayed start",
+    "delayed",
+    "postponed",
+}
 # How many recent confirmed lineups back a projection.
 PROJECTION_LOOKBACK_GAMES = 10
 

@@ -499,3 +499,39 @@ class DailyPrediction(Base):
         Index("ix_daily_prediction_date_actual", "game_date", "actual_hr"),
     )
 
+
+
+class DailyTop25Snapshot(Base):
+    """One row of the permanent, immutable daily Top 25 (locked at cutoff).
+
+    Written once per slate by ``services.top25.create_top25_snapshot`` at
+    90 minutes before the slate's earliest scheduled first pitch. Only
+    ``player_status``/``status_updated_at`` may change afterwards (scratch/DNP
+    marking); rank, probability and every other locked field are immutable.
+    """
+
+    __tablename__ = "daily_top25_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    slate_date: Mapped[date] = mapped_column(Date, index=True)
+    rank: Mapped[int] = mapped_column(SmallInteger)
+    player_id: Mapped[int] = mapped_column(Integer, index=True)
+    player_name: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    team_abbreviation: Mapped[Optional[str]] = mapped_column(String(8), nullable=True)
+    game_id: Mapped[int] = mapped_column(Integer, index=True)
+    hr_probability: Mapped[float] = mapped_column(Float)
+    confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    model_version: Mapped[str] = mapped_column(String(64))
+    lineup_status: Mapped[str] = mapped_column(String(16))
+    lineup_slot: Mapped[Optional[int]] = mapped_column(SmallInteger, nullable=True)
+    first_pitch_utc: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    lock_time_utc: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    #: 'active' at lock; may later be marked 'scratched' / 'dnp'. Never replaced.
+    player_status: Mapped[str] = mapped_column(String(16), default="active")
+    status_updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint("slate_date", "rank", name="uq_top25_date_rank"),
+        UniqueConstraint("slate_date", "game_id", "player_id", name="uq_top25_date_game_player"),
+    )
